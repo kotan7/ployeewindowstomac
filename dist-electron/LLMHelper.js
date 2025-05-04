@@ -8,6 +8,7 @@ const generative_ai_1 = require("@google/generative-ai");
 const fs_1 = __importDefault(require("fs"));
 class LLMHelper {
     model;
+    systemPrompt = `You are Wingman AI, a helpful, proactive assistant for any kind of problem or situation (not just coding). For any user input, analyze the situation, provide a clear problem statement, relevant context, and suggest several possible responses or actions the user could take next. Always explain your reasoning. Present your suggestions as a list of options or next steps.`;
     constructor(apiKey) {
         const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
         this.model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
@@ -31,29 +32,12 @@ class LLMHelper {
     async extractProblemFromImages(imagePaths) {
         try {
             const imageParts = await Promise.all(imagePaths.map(path => this.fileToGenerativePart(path)));
-            const prompt = `You are a coding problem analyzer. Please analyze these images of a coding problem and extract the following information in JSON format:
-      {
-        "problem_statement": "The complete problem statement",
-        "input_format": {
-          "description": "Description of input format",
-          "parameters": [{"name": "param name", "type": "param type", "description": "param description"}]
-        },
-        "output_format": {
-          "description": "Description of what should be output",
-          "type": "The expected type of the output"
-        },
-        "constraints": [
-          {"description": "Each constraint in plain text"}
-        ],
-        "test_cases": [
-          {
-            "input": "Example input",
-            "output": "Expected output",
-            "explanation": "Explanation if provided"
-          }
-        ]
-      }
-      Important: Return ONLY the JSON object, without any markdown formatting or code blocks.`;
+            const prompt = `${this.systemPrompt}\n\nYou are a wingman. Please analyze these images and extract the following information in JSON format:\n{
+  "problem_statement": "A clear statement of the problem or situation depicted in the images.",
+  "context": "Relevant background or context from the images.",
+  "suggested_responses": ["First possible answer or action", "Second possible answer or action", "..."],
+  "reasoning": "Explanation of why these suggestions are appropriate."
+}\nImportant: Return ONLY the JSON object, without any markdown formatting or code blocks.`;
             const result = await this.model.generateContent([prompt, ...imageParts]);
             const response = await result.response;
             const text = this.cleanJsonResponse(response.text());
@@ -65,29 +49,12 @@ class LLMHelper {
         }
     }
     async generateSolution(problemInfo) {
-        const prompt = `Given this coding problem:
-    ${JSON.stringify(problemInfo, null, 2)}
-    
-    Please provide a solution in the following JSON format:
-    {
-      "solution": {
-        "explanation": "Detailed explanation of the approach",
-        "complexity": {
-          "time": "Time complexity",
-          "space": "Space complexity"
-        },
-        "code": "The complete solution code",
-        "test_results": [
-          {
-            "input": "test case input",
-            "expected": "expected output",
-            "actual": "actual output",
-            "passed": true/false
-          }
-        ]
-      }
-    }
-    Important: Return ONLY the JSON object, without any markdown formatting or code blocks.`;
+        const prompt = `${this.systemPrompt}\n\nGiven this problem or situation:\n${JSON.stringify(problemInfo, null, 2)}\n\nPlease provide your response in the following JSON format:\n{
+  "problem_statement": "Restate the problem or situation.",
+  "context": "Relevant background/context.",
+  "suggested_responses": ["First possible answer or action", "Second possible answer or action", "..."],
+  "reasoning": "Explanation of why these suggestions are appropriate."
+}\nImportant: Return ONLY the JSON object, without any markdown formatting or code blocks.`;
         const result = await this.model.generateContent(prompt);
         const response = await result.response;
         const text = this.cleanJsonResponse(response.text());
@@ -96,34 +63,12 @@ class LLMHelper {
     async debugSolutionWithImages(problemInfo, currentCode, debugImagePaths) {
         try {
             const imageParts = await Promise.all(debugImagePaths.map(path => this.fileToGenerativePart(path)));
-            const prompt = `You are a coding problem debugger. Given:
-      1. The original problem: ${JSON.stringify(problemInfo, null, 2)}
-      2. The current solution: ${currentCode}
-      3. The debug information in the provided images
-      
-      Please analyze the debug information and provide feedback in this JSON format:
-      {
-        "analysis": {
-          "issues_found": [
-            {
-              "description": "Description of the issue",
-              "location": "Where in the code",
-              "severity": "high/medium/low"
-            }
-          ],
-          "suggested_fixes": [
-            {
-              "description": "Description of the fix",
-              "code_change": "The specific code change needed"
-            }
-          ]
-        },
-        "improved_solution": {
-          "code": "The complete improved solution",
-          "explanation": "Explanation of the changes made"
-        }
-      }
-      Important: Return ONLY the JSON object, without any markdown formatting or code blocks.`;
+            const prompt = `${this.systemPrompt}\n\nYou are a wingman. Given:\n1. The original problem or situation: ${JSON.stringify(problemInfo, null, 2)}\n2. The current response or approach: ${currentCode}\n3. The debug information in the provided images\n\nPlease analyze the debug information and provide feedback in this JSON format:\n{
+  "problem_statement": "Restate the problem or situation.",
+  "context": "Relevant background/context.",
+  "suggested_responses": ["First possible answer or action", "Second possible answer or action", "..."],
+  "reasoning": "Explanation of why these suggestions are appropriate."
+}\nImportant: Return ONLY the JSON object, without any markdown formatting or code blocks.`;
             const result = await this.model.generateContent([prompt, ...imageParts]);
             const response = await result.response;
             const text = this.cleanJsonResponse(response.text());
@@ -143,7 +88,7 @@ class LLMHelper {
                     mimeType: "audio/mp3"
                 }
             };
-            const prompt = "Describe this audio clip.";
+            const prompt = `${this.systemPrompt}\n\nDescribe this audio clip. In addition to your main answer, suggest several possible actions or responses the user could take next based on the audio. Do not return a structured JSON object, just answer naturally as you would to a user.`;
             const result = await this.model.generateContent([prompt, audioPart]);
             const response = await result.response;
             const text = response.text();
@@ -162,7 +107,7 @@ class LLMHelper {
                     mimeType
                 }
             };
-            const prompt = "Describe this audio clip.";
+            const prompt = `${this.systemPrompt}\n\nDescribe this audio clip. In addition to your main answer, suggest several possible actions or responses the user could take next based on the audio. Do not return a structured JSON object, just answer naturally as you would to a user.`;
             const result = await this.model.generateContent([prompt, audioPart]);
             const response = await result.response;
             const text = response.text();
