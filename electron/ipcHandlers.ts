@@ -92,6 +92,17 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   })
 
+  // IPC handler for analyzing image from file path
+  ipcMain.handle("analyze-image-file", async (event, path: string) => {
+    try {
+      const result = await appState.processingHelper.getLLMHelper().analyzeImageFile(path)
+      return result
+    } catch (error: any) {
+      console.error("Error in analyze-image-file handler:", error)
+      throw error
+    }
+  })
+
   ipcMain.handle("quit-app", () => {
     app.quit()
   })

@@ -83,6 +83,17 @@ function initializeIpcHandlers(appState) {
             throw error;
         }
     });
+    // IPC handler for analyzing image from file path
+    electron_1.ipcMain.handle("analyze-image-file", async (event, path) => {
+        try {
+            const result = await appState.processingHelper.getLLMHelper().analyzeImageFile(path);
+            return result;
+        }
+        catch (error) {
+            console.error("Error in analyze-image-file handler:", error);
+            throw error;
+        }
+    });
     electron_1.ipcMain.handle("quit-app", () => {
         electron_1.app.quit();
     });

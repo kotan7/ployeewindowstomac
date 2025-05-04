@@ -56,41 +56,30 @@ export class ProcessingHelper {
         }
       }
 
+      // NEW: Handle screenshot as plain text (like audio)
       mainWindow.webContents.send(this.appState.PROCESSING_EVENTS.INITIAL_START)
       this.appState.setView("solutions")
-
       this.currentProcessingAbortController = new AbortController()
-
       try {
-        // Extract problem information using LLM with vision
-        const problemInfo = await this.llmHelper.extractProblemFromImages(screenshotQueue)
-
-        // Store problem info
-        this.appState.setProblemInfo(problemInfo)
-
-        // Send problem extracted event
-        mainWindow.webContents.send(
-          this.appState.PROCESSING_EVENTS.PROBLEM_EXTRACTED,
-          problemInfo
-        )
-
-        // Generate solution
-        const solution = await this.llmHelper.generateSolution(problemInfo)
-
-        mainWindow.webContents.send(
-          this.appState.PROCESSING_EVENTS.SOLUTION_SUCCESS,
-          solution
-        )
-
+        const imageResult = await this.llmHelper.analyzeImageFile(lastPath);
+        const problemInfo = {
+          problem_statement: imageResult.text,
+          input_format: { description: "Generated from screenshot", parameters: [] as any[] },
+          output_format: { description: "Generated from screenshot", type: "string", subtype: "text" },
+          complexity: { time: "N/A", space: "N/A" },
+          test_cases: [] as any[],
+          validation_type: "manual",
+          difficulty: "custom"
+        };
+        mainWindow.webContents.send(this.appState.PROCESSING_EVENTS.PROBLEM_EXTRACTED, problemInfo);
+        this.appState.setProblemInfo(problemInfo);
       } catch (error: any) {
-        console.error("Processing error:", error)
-        mainWindow.webContents.send(
-          this.appState.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR,
-          error.message
-        )
+        console.error("Image processing error:", error)
+        mainWindow.webContents.send(this.appState.PROCESSING_EVENTS.INITIAL_SOLUTION_ERROR, error.message)
       } finally {
         this.currentProcessingAbortController = null
       }
+      return;
     } else {
       // Debug mode
       const extraScreenshotQueue = this.appState.getScreenshotHelper().getExtraScreenshotQueue()
@@ -161,5 +150,9 @@ export class ProcessingHelper {
   // Add audio file processing method
   public async processAudioFile(filePath: string) {
     return this.llmHelper.analyzeAudioFile(filePath);
+  }
+
+  public getLLMHelper() {
+    return this.llmHelper;
   }
 }
