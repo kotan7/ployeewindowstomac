@@ -2,6 +2,8 @@
 
 A desktop application to help you cheat on everything. 
 
+![Cluely Screenshot](image.png)
+
 ## 🚀 Quick Start Guide
 
 ### Prerequisites
