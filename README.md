@@ -16,7 +16,7 @@ A desktop application to help you cheat on everything.
 1. Clone the repository:
 ```bash
 git clone [repository-url]
-cd interview-coder
+cd free-cluely
 ```
 
 2. Install dependencies:
