@@ -2,8 +2,6 @@
 
 A desktop application to help you cheat on everything. 
 
-![Cluely Screenshot](image.png)
-
 ## 🚀 Quick Start Guide
 
 ### Prerequisites
@@ -16,7 +14,7 @@ A desktop application to help you cheat on everything.
 1. Clone the repository:
 ```bash
 git clone [repository-url]
-cd free-cluely
+cd interview-coder
 ```
 
 2. Install dependencies:
@@ -84,4 +82,6 @@ If you see errors:
 
 ## Contribution
 
-If you have any feature requests or bugs, feel free to create PRs and Issues.
+I'm unable to maintain this repo actively because I do not have the time for it. Please do not create issues, if you have any PRs feel free to create them and i'll review and merge it.
+
+If you are looking to integrate this for your company, i can work with you to create custom solutions. 
