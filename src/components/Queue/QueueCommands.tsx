@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useRef } from "react"
 import { IoLogOutOutline } from "react-icons/io5"
+import { Dialog, DialogContent, DialogClose } from "../ui/dialog"
 
 interface QueueCommandsProps {
   onTooltipVisibilityChange: (visible: boolean, height: number) => void
   screenshots: Array<{ path: string; preview: string }>
+  onChatToggle: () => void
 }
 
 const QueueCommands: React.FC<QueueCommandsProps> = ({
   onTooltipVisibilityChange,
-  screenshots
+  screenshots,
+  onChatToggle
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false)
   const tooltipRef = useRef<HTMLDivElement>(null)
@@ -16,6 +19,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null)
   const [audioResult, setAudioResult] = useState<string | null>(null)
   const chunks = useRef<Blob[]>([])
+  // Remove all chat-related state, handlers, and the Dialog overlay from this file.
 
   useEffect(() => {
     let tooltipHeight = 0
@@ -69,9 +73,11 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     }
   }
 
+  // Remove handleChatSend function
+
   return (
-    <div className="pt-2 w-fit">
-      <div className="text-xs text-white/90 backdrop-blur-md bg-black/60 rounded-lg py-2 px-4 flex items-center justify-center gap-4">
+    <div className="w-fit">
+      <div className="text-xs text-white/90 liquid-glass-bar py-1 px-4 flex items-center justify-center gap-4 draggable-area">
         {/* Show/Hide */}
         <div className="flex items-center gap-2">
           <span className="text-[11px] leading-none">Show/Hide</span>
@@ -86,19 +92,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         </div>
 
         {/* Screenshot */}
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] leading-none truncate">
-            {screenshots.length === 0 ? "Take first screenshot" : "Screenshot"}
-          </span>
-          <div className="flex gap-1">
-            <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-              ⌘
-            </button>
-            <button className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-1.5 py-1 text-[11px] leading-none text-white/70">
-              H
-            </button>
-          </div>
-        </div>
+        {/* Removed screenshot button from main bar for seamless screenshot-to-LLM UX */}
 
         {/* Solve Command */}
         {screenshots.length > 0 && (
@@ -129,6 +123,20 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
             )}
           </button>
         </div>
+
+        {/* Chat Button */}
+        <div className="flex items-center gap-2">
+          <button
+            className="bg-white/10 hover:bg-white/20 transition-colors rounded-md px-2 py-1 text-[11px] leading-none text-white/70 flex items-center gap-1"
+            onClick={onChatToggle}
+            type="button"
+          >
+            💬 Chat
+          </button>
+        </div>
+
+        {/* Add this button in the main button row, before the separator and sign out */}
+        {/* Remove the Chat button */}
 
         {/* Question mark with tooltip */}
         <div
@@ -229,6 +237,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           <span className="font-semibold">Audio Result:</span> {audioResult}
         </div>
       )}
+      {/* Chat Dialog Overlay */}
+      {/* Remove the Dialog component */}
     </div>
   )
 }

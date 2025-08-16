@@ -9,6 +9,12 @@ export class ShortcutsHelper {
   }
 
   public registerGlobalShortcuts(): void {
+    // Add global shortcut to show/center window
+    globalShortcut.register("CommandOrControl+Shift+Space", () => {
+      console.log("Show/Center window shortcut pressed...")
+      this.appState.centerAndShowWindow()
+    })
+
     globalShortcut.register("CommandOrControl+H", async () => {
       const mainWindow = this.appState.getMainWindow()
       if (mainWindow) {

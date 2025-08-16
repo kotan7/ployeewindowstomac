@@ -72,28 +72,29 @@ export class WindowHelper {
     this.screenWidth = workArea.width
     this.screenHeight = workArea.height
 
-    this.step = Math.floor(this.screenWidth / 10) // 10 steps
-    this.currentX = 0 // Start at the left
-
+    
     const windowSettings: Electron.BrowserWindowConstructorOptions = {
+      width: 400,
       height: 600,
-      minWidth: undefined,
-      maxWidth: undefined,
-      x: this.currentX,
-      y: 0,
+      minWidth: 300,
+      minHeight: 200,
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: true,
         preload: path.join(__dirname, "preload.js")
       },
-      show: true,
+      show: false, // Start hidden, then show after setup
       alwaysOnTop: true,
       frame: false,
       transparent: true,
       fullscreenable: false,
       hasShadow: false,
       backgroundColor: "#00000000",
-      focusable: true
+      focusable: true,
+      resizable: true,
+      movable: true,
+      x: 100, // Start at a visible position
+      y: 100
     }
 
     this.mainWindow = new BrowserWindow(windowSettings)
@@ -119,6 +120,18 @@ export class WindowHelper {
 
     this.mainWindow.loadURL(startUrl).catch((err) => {
       console.error("Failed to load URL:", err)
+    })
+
+    // Show window after loading URL and center it
+    this.mainWindow.once('ready-to-show', () => {
+      if (this.mainWindow) {
+        // Center the window first
+        this.centerWindow()
+        this.mainWindow.show()
+        this.mainWindow.focus()
+        this.mainWindow.setAlwaysOnTop(true)
+        console.log("Window is now visible and centered")
+      }
     })
 
     const bounds = this.mainWindow.getBounds()
@@ -205,6 +218,53 @@ export class WindowHelper {
     } else {
       this.showMainWindow()
     }
+  }
+
+  private centerWindow(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      return
+    }
+
+    const primaryDisplay = screen.getPrimaryDisplay()
+    const workArea = primaryDisplay.workAreaSize
+    
+    // Get current window size or use defaults
+    const windowBounds = this.mainWindow.getBounds()
+    const windowWidth = windowBounds.width || 400
+    const windowHeight = windowBounds.height || 600
+    
+    // Calculate center position
+    const centerX = Math.floor((workArea.width - windowWidth) / 2)
+    const centerY = Math.floor((workArea.height - windowHeight) / 2)
+    
+    // Set window position
+    this.mainWindow.setBounds({
+      x: centerX,
+      y: centerY,
+      width: windowWidth,
+      height: windowHeight
+    })
+    
+    // Update internal state
+    this.windowPosition = { x: centerX, y: centerY }
+    this.windowSize = { width: windowWidth, height: windowHeight }
+    this.currentX = centerX
+    this.currentY = centerY
+  }
+
+  public centerAndShowWindow(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      console.warn("Main window does not exist or is destroyed.")
+      return
+    }
+
+    this.centerWindow()
+    this.mainWindow.show()
+    this.mainWindow.focus()
+    this.mainWindow.setAlwaysOnTop(true)
+    this.isWindowVisible = true
+    
+    console.log(`Window centered and shown`)
   }
 
   // New methods for window movement

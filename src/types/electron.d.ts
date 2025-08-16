@@ -20,9 +20,12 @@ export interface ElectronAPI {
   takeScreenshot: () => Promise<void>
   moveWindowLeft: () => Promise<void>
   moveWindowRight: () => Promise<void>
+  moveWindowUp: () => Promise<void>
+  moveWindowDown: () => Promise<void>
   analyzeAudioFromBase64: (data: string, mimeType: string) => Promise<{ text: string; timestamp: number }>
   analyzeAudioFile: (path: string) => Promise<{ text: string; timestamp: number }>
   quitApp: () => Promise<void>
+  invoke: (channel: string, ...args: any[]) => Promise<any>
 }
 
 declare global {

@@ -159,4 +159,15 @@ export class LLMHelper {
       throw error;
     }
   }
+
+  public async chatWithGemini(message: string): Promise<string> {
+    try {
+      const result = await this.model.generateContent(message);
+      const response = await result.response;
+      return response.text();
+    } catch (error) {
+      console.error("[LLMHelper] Error in chatWithGemini:", error);
+      throw error;
+    }
+  }
 } 

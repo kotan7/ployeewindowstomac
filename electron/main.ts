@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron"
+import { app, BrowserWindow, Tray, Menu, nativeImage } from "electron"
 import { initializeIpcHandlers } from "./ipcHandlers"
 import { WindowHelper } from "./WindowHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
@@ -12,6 +12,7 @@ export class AppState {
   private screenshotHelper: ScreenshotHelper
   public shortcutsHelper: ShortcutsHelper
   public processingHelper: ProcessingHelper
+  private tray: Tray | null = null
 
   // View management
   private view: "queue" | "solutions" = "queue"
@@ -177,6 +178,86 @@ export class AppState {
     this.windowHelper.moveWindowUp()
   }
 
+  public centerAndShowWindow(): void {
+    this.windowHelper.centerAndShowWindow()
+  }
+
+  public createTray(): void {
+    // Create a simple tray icon
+    const image = nativeImage.createEmpty()
+    
+    // Try to use a system template image for better integration
+    let trayImage = image
+    try {
+      // Create a minimal icon - just use an empty image and set the title
+      trayImage = nativeImage.createFromBuffer(Buffer.alloc(0))
+    } catch (error) {
+      console.log("Using empty tray image")
+      trayImage = nativeImage.createEmpty()
+    }
+    
+    this.tray = new Tray(trayImage)
+    
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Show Interview Coder',
+        click: () => {
+          this.centerAndShowWindow()
+        }
+      },
+      {
+        label: 'Toggle Window',
+        click: () => {
+          this.toggleMainWindow()
+        }
+      },
+      {
+        type: 'separator'
+      },
+      {
+        label: 'Take Screenshot (Cmd+H)',
+        click: async () => {
+          try {
+            const screenshotPath = await this.takeScreenshot()
+            const preview = await this.getImagePreview(screenshotPath)
+            const mainWindow = this.getMainWindow()
+            if (mainWindow) {
+              mainWindow.webContents.send("screenshot-taken", {
+                path: screenshotPath,
+                preview
+              })
+            }
+          } catch (error) {
+            console.error("Error taking screenshot from tray:", error)
+          }
+        }
+      },
+      {
+        type: 'separator'
+      },
+      {
+        label: 'Quit',
+        accelerator: 'Command+Q',
+        click: () => {
+          app.quit()
+        }
+      }
+    ])
+    
+    this.tray.setToolTip('Interview Coder - Press Cmd+Shift+Space to show')
+    this.tray.setContextMenu(contextMenu)
+    
+    // Set a title for macOS (will appear in menu bar)
+    if (process.platform === 'darwin') {
+      this.tray.setTitle('IC')
+    }
+    
+    // Double-click to show window
+    this.tray.on('double-click', () => {
+      this.centerAndShowWindow()
+    })
+  }
+
   public setHasDebugged(value: boolean): void {
     this.hasDebugged = value
   }
@@ -196,6 +277,7 @@ async function initializeApp() {
   app.whenReady().then(() => {
     console.log("App is ready")
     appState.createWindow()
+    appState.createTray()
     // Register global shortcuts using ShortcutsHelper
     appState.shortcutsHelper.registerGlobalShortcuts()
   })

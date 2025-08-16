@@ -103,7 +103,38 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   })
 
+  ipcMain.handle("gemini-chat", async (event, message: string) => {
+    try {
+      const result = await appState.processingHelper.getLLMHelper().chatWithGemini(message);
+      return result;
+    } catch (error: any) {
+      console.error("Error in gemini-chat handler:", error);
+      throw error;
+    }
+  });
+
   ipcMain.handle("quit-app", () => {
     app.quit()
+  })
+
+  // Window movement handlers
+  ipcMain.handle("move-window-left", async () => {
+    appState.moveWindowLeft()
+  })
+
+  ipcMain.handle("move-window-right", async () => {
+    appState.moveWindowRight()
+  })
+
+  ipcMain.handle("move-window-up", async () => {
+    appState.moveWindowUp()
+  })
+
+  ipcMain.handle("move-window-down", async () => {
+    appState.moveWindowDown()
+  })
+
+  ipcMain.handle("center-and-show-window", async () => {
+    appState.centerAndShowWindow()
   })
 }
