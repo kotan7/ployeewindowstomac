@@ -74,6 +74,8 @@ The built app will be in the `release` folder.
 
 ### Troubleshooting
 
+Note: Working to add proper support to windows and ubuntu
+
 If you see errors:
 1. Delete the `node_modules` folder
 2. Delete `package-lock.json`
