@@ -39,16 +39,16 @@ interface ElectronAPI {
   // Audio Stream methods
   audioStreamStart: () => Promise<{ success: boolean; error?: string }>
   audioStreamStop: () => Promise<{ success: boolean; error?: string }>
-  audioStreamProcessChunk: (audioData: Buffer) => Promise<{ success: boolean; error?: string }>
-  audioStreamGetState: () => Promise<any>
-  audioStreamGetQuestions: () => Promise<any[]>
+  audioStreamProcessChunk: (audioData: Float32Array) => Promise<{ success: boolean; error?: string }>
+  audioStreamGetState: () => Promise<{ isListening: boolean; error?: string }>
+  audioStreamGetQuestions: () => Promise<Array<{ text: string; timestamp: number }>>
   audioStreamClearQuestions: () => Promise<{ success: boolean; error?: string }>
   audioStreamAnswerQuestion: (questionText: string, collectionId?: string) => Promise<{ response: string; timestamp: number }>
   
   // Audio Stream event listeners
-  onAudioQuestionDetected: (callback: (question: any) => void) => () => void
-  onAudioBatchProcessed: (callback: (questions: any[]) => void) => () => void
-  onAudioStreamStateChanged: (callback: (state: any) => void) => () => void
+  onAudioQuestionDetected: (callback: (question: { text: string; timestamp: number }) => void) => () => void
+  onAudioBatchProcessed: (callback: (questions: Array<{ text: string; timestamp: number }>) => void) => () => void
+  onAudioStreamStateChanged: (callback: (state: { isListening: boolean; error?: string }) => void) => () => void
   onAudioStreamError: (callback: (error: string) => void) => () => void
   // Auth methods
   authSignIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>
@@ -201,9 +201,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Audio Stream methods
   audioStreamStart: () => ipcRenderer.invoke("audio-stream-start"),
   audioStreamStop: () => ipcRenderer.invoke("audio-stream-stop"),
-  audioStreamProcessChunk: (audioData: Buffer) => ipcRenderer.invoke("audio-stream-process-chunk", audioData),
-  audioStreamGetState: () => ipcRenderer.invoke("audio-stream-get-state"),
-  audioStreamGetQuestions: () => ipcRenderer.invoke("audio-stream-get-questions"),
+  audioStreamProcessChunk: (audioData: Float32Array) => ipcRenderer.invoke("audio-stream-process-chunk", audioData),
+  audioStreamGetState: () => ipcRenderer.invoke("audio-stream-get-state") as Promise<{ isListening: boolean; error?: string }>,
+  audioStreamGetQuestions: () => ipcRenderer.invoke("audio-stream-get-questions") as Promise<Array<{ text: string; timestamp: number }>>,
   audioStreamClearQuestions: () => ipcRenderer.invoke("audio-stream-clear-questions"),
   audioStreamAnswerQuestion: (questionText: string, collectionId?: string) => ipcRenderer.invoke("audio-stream-answer-question", questionText, collectionId),
   

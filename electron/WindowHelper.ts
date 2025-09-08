@@ -93,6 +93,7 @@ export class WindowHelper {
       focusable: true,
       resizable: true,
       movable: true,
+      type: 'panel', // Changed from default to panel for better window management
       x: 100, // Start at a visible position
       y: 100
     }
@@ -175,6 +176,17 @@ export class WindowHelper {
     return this.mainWindow
   }
 
+  public cleanup(): void {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.setAlwaysOnTop(false)
+      this.mainWindow.close()
+      this.mainWindow = null
+      this.isWindowVisible = false
+      this.windowPosition = null
+      this.windowSize = null
+    }
+  }
+
   public isVisible(): boolean {
     return this.isWindowVisible
   }
@@ -207,7 +219,9 @@ export class WindowHelper {
       })
     }
 
-    this.mainWindow.showInactive()
+    this.mainWindow.show()
+    this.mainWindow.focus()
+    this.mainWindow.setAlwaysOnTop(true, 'floating')
 
     this.isWindowVisible = true
   }

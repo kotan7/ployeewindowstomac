@@ -362,6 +362,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   });
 
   ipcMain.handle("quit-app", () => {
+    appState.cleanupWindow()
     app.quit()
   })
 
@@ -407,7 +408,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  ipcMain.handle("audio-stream-process-chunk", async (event, audioData: Buffer) => {
+  ipcMain.handle("audio-stream-process-chunk", async (event, audioData: Float32Array) => {
     try {
       await appState.audioStreamProcessor.processAudioChunk(audioData);
       return { success: true };

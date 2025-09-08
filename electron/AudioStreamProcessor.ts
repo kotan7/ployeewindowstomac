@@ -28,9 +28,10 @@ export class AudioStreamProcessor extends EventEmitter {
   private lastBatchTime: number = 0;
   
   // Audio processing
-  private currentAudioData: Buffer[] = [];
+  private currentAudioData: Float32Array[] = [];
   private lastSilenceTime: number = 0;
   private wordCount: number = 0;
+  private tempBuffer: Float32Array | null = null;
 
   constructor(openaiApiKey: string, config?: Partial<AudioStreamConfig>) {
     super();
@@ -133,12 +134,12 @@ export class AudioStreamProcessor extends EventEmitter {
   /**
    * Process audio data chunk received from renderer
    */
-  public async processAudioChunk(audioBuffer: Buffer): Promise<void> {
+  public async processAudioChunk(audioData: Float32Array): Promise<void> {
     if (!this.state.isListening) return;
 
     try {
       // Add to current audio accumulation
-      this.currentAudioData.push(audioBuffer);
+      this.currentAudioData.push(audioData);
       this.state.lastActivityTime = Date.now();
       
       // Check if we should create a chunk based on duration or word count
@@ -151,6 +152,8 @@ export class AudioStreamProcessor extends EventEmitter {
     } catch (error) {
       console.error('[AudioStreamProcessor] Error processing audio chunk:', error);
       this.emit('error', error as Error);
+      this.state.isListening = false;
+      this.emit('state-changed', { ...this.state });
     }
   }
 
@@ -172,14 +175,29 @@ export class AudioStreamProcessor extends EventEmitter {
     if (this.currentAudioData.length === 0) return;
 
     try {
-      // Combine all audio buffers
-      const combinedBuffer = Buffer.concat(this.currentAudioData);
+      // Combine all Float32Arrays
+      const totalLength = this.currentAudioData.reduce((acc, arr) => acc + arr.length, 0);
+      const combinedArray = new Float32Array(totalLength);
+      let offset = 0;
+      
+      for (const array of this.currentAudioData) {
+        combinedArray.set(array, offset);
+        offset += array.length;
+      }
+      
+      // Convert to 16-bit PCM Buffer for Whisper API
+      const pcmBuffer = Buffer.alloc(combinedArray.length * 2);
+      for (let i = 0; i < combinedArray.length; i++) {
+        const sample = Math.max(-1, Math.min(1, combinedArray[i]));
+        const value = Math.floor(sample < 0 ? sample * 32768 : sample * 32767);
+        pcmBuffer.writeInt16LE(value, i * 2);
+      }
       
       const chunk: AudioChunk = {
         id: uuidv4(),
-        buffer: combinedBuffer,
+        data: combinedArray,
         timestamp: Date.now(),
-        duration: this.calculateDuration(combinedBuffer),
+        duration: this.calculateDuration(pcmBuffer),
         wordCount: this.wordCount
       };
 
@@ -195,6 +213,8 @@ export class AudioStreamProcessor extends EventEmitter {
     } catch (error) {
       console.error('[AudioStreamProcessor] Error creating chunk:', error);
       this.emit('error', error as Error);
+      this.state.isListening = false;
+      this.emit('state-changed', { ...this.state });
     }
   }
 
@@ -209,7 +229,13 @@ export class AudioStreamProcessor extends EventEmitter {
       this.emit('state-changed', { ...this.state });
 
       // Convert buffer to temporary file for Whisper API
-      const tempFilePath = await this.createTempAudioFile(chunk.buffer);
+      const pcmBuffer = Buffer.alloc(chunk.data.length * 2);
+      for (let i = 0; i < chunk.data.length; i++) {
+        const sample = Math.max(-1, Math.min(1, chunk.data[i]));
+        const value = Math.floor(sample < 0 ? sample * 32768 : sample * 32767);
+        pcmBuffer.writeInt16LE(value, i * 2);
+      }
+      const tempFilePath = await this.createTempAudioFile(pcmBuffer);
       
       const transcription = await this.openai.audio.transcriptions.create({
         file: fs.createReadStream(tempFilePath),
@@ -315,8 +341,7 @@ export class AudioStreamProcessor extends EventEmitter {
         refinedQuestions.forEach(refined => {
           const original = this.state.questionBuffer.find(q => q.id === refined.id);
           if (original) {
-            original.isRefined = true;
-            original.refinedText = refined.refinedText;
+            original.text = refined.text;
           }
         });
         
@@ -355,9 +380,7 @@ ${questionTexts.join('\n')}
       // Parse the refined questions
       const refinedTexts = result.split('\n').filter(line => line.trim().length > 0);
       
-      return preprocessed.map((question, index) => ({
-        ...question,
-        isRefined: true,
+      return preprocessed.map((question, index) => ({...question,
         refinedText: refinedTexts[index] || question.text
       }));
       

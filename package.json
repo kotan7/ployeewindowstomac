@@ -8,6 +8,7 @@
     "build": "npm run clean && tsc -p electron/tsconfig.json && vite build",
     "preview": "vite preview",
     "electron:dev": "tsc -p electron/tsconfig.json && electron .",
+    "start": "concurrently \"npm run dev\" \"wait-on http://localhost:5181 && npm run electron:dev\"",
     "app:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env electron .\"",
     "app:build": "npm run build && electron-builder",
     "app:build:all": "npm run build && electron-builder --mac --win --linux",

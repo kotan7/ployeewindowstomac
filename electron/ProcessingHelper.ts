@@ -20,9 +20,11 @@ export class ProcessingHelper {
     this.appState = appState
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
-      throw new Error("GEMINI_API_KEY not found in environment variables")
+      console.warn("GEMINI_API_KEY not found in environment variables - running in limited mode")
+      this.llmHelper = new LLMHelper('dummy-key') // Initialize with dummy key for limited functionality
+    } else {
+      this.llmHelper = new LLMHelper(apiKey)
     }
-    this.llmHelper = new LLMHelper(apiKey)
   }
 
   public async processScreenshots(): Promise<void> {

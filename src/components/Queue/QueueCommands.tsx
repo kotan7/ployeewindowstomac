@@ -221,10 +221,11 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       // Get user media with audio
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
-          sampleRate: 16000,
-          channelCount: 1,
+          sampleRate: { ideal: 16000 },
+          channelCount: { ideal: 1 },
           echoCancellation: true,
           noiseSuppression: true,
+          autoGainControl: true
         } 
       });
       
@@ -241,20 +242,13 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         const inputBuffer = event.inputBuffer;
         const inputData = inputBuffer.getChannelData(0);
         
-        // Convert Float32Array to Buffer for sending to main process
-        const buffer = new ArrayBuffer(inputData.length * 2);
-        const view = new Int16Array(buffer);
-        
-        // Convert float samples to 16-bit PCM
-        for (let i = 0; i < inputData.length; i++) {
-          view[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-        }
-        
-        // Send chunk to main process for processing
+        // Send Float32Array directly to main process
         try {
-          await window.electronAPI.audioStreamProcessChunk(Buffer.from(buffer));
+          await window.electronAPI.audioStreamProcessChunk(inputData);
         } catch (error) {
           console.error('[QueueCommands] Error sending audio chunk:', error);
+          setIsListening(false);
+          stopAudioCapture();
         }
       };
       
@@ -264,10 +258,17 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       setAudioContext(ctx);
       setProcessor(scriptProcessor);
       
+      const { success, error } = await window.electronAPI.audioStreamStart();
+      if (!success) {
+        throw new Error(error || 'Failed to start audio stream');
+      }
+      
       console.log('[QueueCommands] Audio capture started successfully');
       
     } catch (error) {
       console.error('[QueueCommands] Failed to start audio capture:', error);
+      setIsListening(false);
+      stopAudioCapture();
       throw error;
     }
   };

@@ -1,41 +1,14 @@
 export interface AudioChunk {
   id: string;
-  buffer: Buffer;
+  data: Float32Array;
   timestamp: number;
   duration: number;
-  wordCount?: number;
-}
-
-export interface TranscriptionResult {
-  id: string;
-  text: string;
-  timestamp: number;
-  confidence?: number;
-  isQuestion: boolean;
-  originalChunkId: string;
-}
-
-export interface DetectedQuestion {
-  id: string;
-  text: string;
-  timestamp: number;
-  isRefined: boolean;
-  refinedText?: string;
-  confidence?: number;
-  originalTranscriptionId: string;
-}
-
-export interface QuestionBatch {
-  id: string;
-  questions: DetectedQuestion[];
-  timestamp: number;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  wordCount: number;
 }
 
 export interface AudioStreamState {
   isListening: boolean;
   isProcessing: boolean;
-  currentChunk?: AudioChunk;
   lastActivityTime: number;
   questionBuffer: DetectedQuestion[];
   batchProcessor: {
@@ -47,19 +20,41 @@ export interface AudioStreamState {
 
 export interface AudioStreamConfig {
   sampleRate: number;
-  chunkDuration: number; // in milliseconds
-  silenceThreshold: number; // in milliseconds
+  chunkDuration: number;
+  silenceThreshold: number;
   maxWords: number;
   questionDetectionEnabled: boolean;
-  batchInterval: number; // in milliseconds
+  batchInterval: number;
   maxBatchSize: number;
 }
 
+export interface DetectedQuestion {
+  id: string;
+  text: string;
+  timestamp: number;
+  confidence: number;
+}
+
+export interface QuestionBatch {
+  id: string;
+  questions: DetectedQuestion[];
+  timestamp: number;
+}
+
+export interface TranscriptionResult {
+  id: string;
+  text: string;
+  timestamp: number;
+  confidence: number;
+  isQuestion: boolean;
+  originalChunkId: string;
+}
+
 export interface AudioStreamEvents {
-  'chunk-recorded': AudioChunk;
-  'transcription-completed': TranscriptionResult;
-  'question-detected': DetectedQuestion;
-  'batch-processed': DetectedQuestion[];
-  'error': Error;
-  'state-changed': AudioStreamState;
+  'state-changed': (state: AudioStreamState) => void;
+  'error': (error: Error) => void;
+  'chunk-recorded': (chunk: AudioChunk) => void;
+  'transcription-completed': (result: TranscriptionResult) => void;
+  'question-detected': (question: DetectedQuestion) => void;
+  'batch-processed': (batch: DetectedQuestion[]) => void;
 }

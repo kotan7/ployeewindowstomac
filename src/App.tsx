@@ -59,6 +59,14 @@ declare global {
       invoke: (channel: string, ...args: any[]) => Promise<any>;
       onVoiceRecordingTrigger: (callback: () => void) => () => void;
       onChatToggle: (callback: () => void) => () => void;
+
+      // Auth methods
+      authSignIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+      authSignUp: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+      authSignOut: () => Promise<{ success: boolean; error?: string }>;
+      authGetState: () => Promise<{ user: any | null; session: any | null; isLoading: boolean }>;
+      authResetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
+      onAuthStateChange: (callback: (state: { user: any | null; session: any | null; isLoading: boolean }) => void) => () => void;
     };
   }
 }
@@ -93,7 +101,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        const initialState = await window.electronAPI.invoke("auth-get-state");
+        const initialState = await window.electronAPI.authGetState();
         setAuthState(initialState);
       } catch (error) {
         console.error("Error getting initial auth state:", error);
@@ -103,28 +111,16 @@ const App: React.FC = () => {
 
     initAuth();
 
-    // Poll for auth state changes
-    const pollAuthState = async () => {
-      try {
-        const currentState = await window.electronAPI.invoke("auth-get-state");
-        setAuthState((prevState) => {
-          // If user was previously unauthenticated and now is authenticated, show window
-          if (!prevState.user && currentState.user && !currentState.isLoading) {
-            console.log("User signed in successfully, showing window");
-            window.electronAPI.invoke("center-and-show-window");
-          }
-          return currentState;
-        });
-      } catch (error) {
-        console.error("Error polling auth state:", error);
+    // Listen for auth state changes
+    const cleanup = window.electronAPI.onAuthStateChange((state) => {
+      setAuthState(state);
+      // If user was previously unauthenticated and now is authenticated, show window
+      if (state.user && !state.isLoading) {
+        console.log("User signed in successfully");
       }
-    };
+    });
 
-    const intervalId = setInterval(pollAuthState, 2000); // Poll every 2 seconds
-
-    return () => {
-      clearInterval(intervalId);
-    };
+    return cleanup;
   }, []);
 
   // Effect for height monitoring
@@ -184,7 +180,7 @@ const App: React.FC = () => {
   // Auth handlers
   const handleSignIn = async (email: string, password: string) => {
     try {
-      return await window.electronAPI.invoke("auth-sign-in", email, password);
+      return await window.electronAPI.authSignIn(email, password);
     } catch (error) {
       console.error("Sign in error:", error);
       return { success: false, error: "Sign in failed" };
@@ -193,7 +189,7 @@ const App: React.FC = () => {
 
   const handleSignUp = async (email: string, password: string) => {
     try {
-      return await window.electronAPI.invoke("auth-sign-up", email, password);
+      return await window.electronAPI.authSignUp(email, password);
     } catch (error) {
       console.error("Sign up error:", error);
       return { success: false, error: "Sign up failed" };
@@ -202,7 +198,7 @@ const App: React.FC = () => {
 
   const handleResetPassword = async (email: string) => {
     try {
-      return await window.electronAPI.invoke("auth-reset-password", email);
+      return await window.electronAPI.authResetPassword(email);
     } catch (error) {
       console.error("Reset password error:", error);
       return { success: false, error: "Password reset failed" };
@@ -211,7 +207,7 @@ const App: React.FC = () => {
 
   const handleSignOut = async () => {
     try {
-      const result = await window.electronAPI.invoke("auth-sign-out");
+      const result = await window.electronAPI.authSignOut();
       if (result.success) {
         // Clear all queries when signing out
         queryClient.clear();

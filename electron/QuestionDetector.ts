@@ -30,10 +30,8 @@ export class QuestionDetector {
       return {
         id: uuidv4(),
         text: text,
-        timestamp: transcription.timestamp,
-        isRefined: false,
-        confidence: transcription.confidence,
-        originalTranscriptionId: transcription.id
+          timestamp: transcription.timestamp,
+          confidence: transcription.confidence
       };
     }
 

@@ -242,6 +242,10 @@ export class AppState {
     this.windowHelper.centerAndShowWindow()
   }
 
+  public cleanupWindow(): void {
+    this.windowHelper.cleanup()
+  }
+
   public createTray(): void {
     // Create a simple tray icon
     const image = nativeImage.createEmpty()

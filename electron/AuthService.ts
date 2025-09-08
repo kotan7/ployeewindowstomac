@@ -51,11 +51,24 @@ export class AuthService {
       // Listen for auth changes
       this.supabase.auth.onAuthStateChange((event, session) => {
         console.log('Auth state changed:', event, session?.user?.email)
+        
+        // Update auth state
         this.updateAuthState({
           user: session?.user || null,
           session: session,
           isLoading: false
         })
+
+        // Handle window visibility after successful sign in
+        if (event === 'SIGNED_IN' && session?.user) {
+          const mainWindow = require('electron').BrowserWindow.getAllWindows()[0]
+          if (mainWindow) {
+            setTimeout(() => {
+              mainWindow.setAlwaysOnTop(true, 'floating')
+              mainWindow.moveTop()
+            }, 1000) // Give time for the UI to update
+          }
+        }
       })
     } catch (error) {
       console.error('Error initializing auth:', error)
