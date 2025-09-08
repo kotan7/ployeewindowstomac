@@ -7,11 +7,12 @@ class AudioCaptureProcessor extends AudioWorkletProcessor {
     
     // Audio accumulation for chunking
     this.audioBuffer = [];
-    this.lastAudioTime = 0;
-    this.silenceThreshold = 0.001; // Silence detection threshold
+    this.lastAudioTime = Date.now(); // Initialize to now to prevent immediate silence detection
+    this.silenceThreshold = 0.01; // Increased threshold for better silence detection
     this.silenceTimeoutMs = 800; // 800ms silence triggers chunk
     this.maxChunkSamples = 16000 * 10; // 10 seconds max chunk length
     this.sampleRate = 16000; // Assume 16kHz sample rate
+    this.minChunkSamples = 16000 * 0.5; // Minimum 0.5 seconds before considering silence
     
     // Log processor initialization
     this.port.postMessage({
@@ -52,7 +53,7 @@ class AudioCaptureProcessor extends AudioWorkletProcessor {
         // Check if we should send a chunk
         const silenceDuration = currentTime - this.lastAudioTime;
         const shouldSendChunk = 
-          (silenceDuration >= this.silenceTimeoutMs && this.audioBuffer.length > 0) || // Silence detected
+          (silenceDuration >= this.silenceTimeoutMs && this.audioBuffer.length >= this.minChunkSamples) || // Silence detected AND minimum length
           (this.audioBuffer.length >= this.maxChunkSamples); // Max length reached
         
         if (shouldSendChunk) {
@@ -60,6 +61,11 @@ class AudioCaptureProcessor extends AudioWorkletProcessor {
           
           // Create a copy of the buffer to send
           const chunkData = new Float32Array(this.audioBuffer);
+          
+          this.port.postMessage({
+            type: 'log',
+            message: `About to send chunk ${this.chunkCount}: ${chunkData.length} samples, ${((chunkData.length / this.sampleRate) * 1000).toFixed(0)}ms, trigger: ${silenceDuration >= this.silenceTimeoutMs ? 'silence' : 'maxLength'}`
+          });
           
           // Send audio chunk to main thread
           this.port.postMessage({
@@ -76,7 +82,7 @@ class AudioCaptureProcessor extends AudioWorkletProcessor {
           
           this.port.postMessage({
             type: 'log',
-            message: `Sent chunk ${this.chunkCount} (${chunkData.length} samples, ${((chunkData.length / this.sampleRate) * 1000).toFixed(0)}ms, trigger: ${silenceDuration >= this.silenceTimeoutMs ? 'silence' : 'maxLength'})`
+            message: `Sent chunk ${this.chunkCount} successfully`
           });
         }
       }

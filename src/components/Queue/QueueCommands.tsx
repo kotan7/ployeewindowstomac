@@ -296,14 +296,31 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
             
             // Send the complete audio chunk to the backend for transcription
             try {
-              console.log('[QueueCommands] Sending audio chunk to main process for transcription...');
-              await window.electronAPI.audioStreamProcessChunk(inputData);
-              console.log('[QueueCommands] Audio chunk sent successfully');
+              console.log('[QueueCommands] Sending audio chunk to main process for transcription...', {
+                dataType: inputData.constructor.name,
+                length: inputData.length,
+                isArray: Array.isArray(inputData),
+                firstFewSamples: Array.from(inputData.slice(0, 5))
+              });
+              window.electronAPI.invoke('debug-log', '[QueueCommands] About to send chunk to backend, length: ' + inputData.length);
+              
+              // Ensure we have a valid Float32Array
+              if (!(inputData instanceof Float32Array)) {
+                console.error('[QueueCommands] Invalid data type, expected Float32Array, got:', inputData.constructor.name);
+                window.electronAPI.invoke('debug-log', '[QueueCommands] Invalid data type: ' + inputData.constructor.name);
+                return;
+              }
+              
+              const result = await window.electronAPI.audioStreamProcessChunk(inputData);
+              
+              console.log('[QueueCommands] Audio chunk sent successfully, result:', result);
+              window.electronAPI.invoke('debug-log', '[QueueCommands] Chunk sent successfully, result: ' + JSON.stringify(result));
             } catch (error) {
               console.error('[QueueCommands] Error sending audio chunk:', error);
               window.electronAPI.invoke('debug-log', '[QueueCommands] Error sending audio chunk: ' + error);
-              setIsListening(false);
-              stopAudioCapture();
+              // Don't stop listening on individual chunk errors
+              // setIsListening(false);
+              // stopAudioCapture();
             }
           }
         };
