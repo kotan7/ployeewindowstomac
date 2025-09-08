@@ -477,7 +477,9 @@ export function initializeIpcHandlers(appState: AppState): void {
         result = await appState.processingHelper.getLLMHelper().chatWithGemini(questionText);
       }
       
-      return { response: result.response || result, timestamp: Date.now() };
+      // Handle different return types: string (chatWithGemini) or object (chatWithRAG)
+      const response = typeof result === 'string' ? result : result.response;
+      return { response, timestamp: Date.now() };
     } catch (error: any) {
       console.error("Error answering question:", error);
       throw error;

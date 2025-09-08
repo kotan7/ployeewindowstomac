@@ -30,11 +30,26 @@ interface ElectronAPI {
   moveWindowRight: () => Promise<void>
   moveWindowUp: () => Promise<void>
   moveWindowDown: () => Promise<void>
-  analyzeAudioFromBase64: (data: string, mimeType: string) => Promise<{ text: string; timestamp: number }>
-  analyzeAudioFile: (path: string) => Promise<{ text: string; timestamp: number }>
+  analyzeAudioFromBase64: (data: string, mimeType: string, collectionId?: string) => Promise<{ text: string; timestamp: number }>
+  analyzeAudioFile: (path: string, collectionId?: string) => Promise<{ text: string; timestamp: number }>
   analyzeImageFile: (path: string) => Promise<void>
   quitApp: () => Promise<void>
   invoke: (channel: string, ...args: any[]) => Promise<any>
+  
+  // Audio Stream methods
+  audioStreamStart: () => Promise<{ success: boolean; error?: string }>
+  audioStreamStop: () => Promise<{ success: boolean; error?: string }>
+  audioStreamProcessChunk: (audioData: Buffer) => Promise<{ success: boolean; error?: string }>
+  audioStreamGetState: () => Promise<any>
+  audioStreamGetQuestions: () => Promise<any[]>
+  audioStreamClearQuestions: () => Promise<{ success: boolean; error?: string }>
+  audioStreamAnswerQuestion: (questionText: string, collectionId?: string) => Promise<{ response: string; timestamp: number }>
+  
+  // Audio Stream event listeners
+  onAudioQuestionDetected: (callback: (question: any) => void) => () => void
+  onAudioBatchProcessed: (callback: (questions: any[]) => void) => () => void
+  onAudioStreamStateChanged: (callback: (state: any) => void) => () => void
+  onAudioStreamError: (callback: (error: string) => void) => () => void
   // Auth methods
   authSignIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>
   authSignUp: (email: string, password: string) => Promise<{ success: boolean; error?: string }>

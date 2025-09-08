@@ -52,10 +52,10 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  
+  // Voice Recording state (existing feature)
   const [isRecording, setIsRecording] = useState(false);
-  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(
-    null
-  );
+  const [voiceMediaRecorder, setVoiceMediaRecorder] = useState<MediaRecorder | null>(null);
   const [audioResult, setAudioResult] = useState<string | null>(null);
   const chunks = useRef<Blob[]>([]);
 
@@ -71,10 +71,9 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     width: 0,
   });
 
-  // Audio Stream state
+  // Audio Stream state (new always-on feature)
   const [isListening, setIsListening] = useState(false);
   const [audioStreamState, setAudioStreamState] = useState<AudioStreamState | null>(null);
-  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
   const [processor, setProcessor] = useState<ScriptProcessorNode | null>(null);
   const audioChunks = useRef<Blob[]>([]);
@@ -175,7 +174,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         handleVoiceRecordingTrigger
       );
     };
-  }, [isRecording, mediaRecorder]);
+  }, [isRecording, voiceMediaRecorder]);
 
   const loadCollections = async () => {
     if (!isAuthenticated) return;
@@ -426,7 +425,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           };
           reader.readAsDataURL(blob);
         };
-        setMediaRecorder(recorder);
+        setVoiceMediaRecorder(recorder);
         recorder.start();
         setIsRecording(true);
       } catch (err) {
@@ -434,9 +433,9 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       }
     } else {
       // Stop recording
-      mediaRecorder?.stop();
+      voiceMediaRecorder?.stop();
       setIsRecording(false);
-      setMediaRecorder(null);
+      setVoiceMediaRecorder(null);
     }
   };
 
