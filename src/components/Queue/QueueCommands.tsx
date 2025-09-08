@@ -75,7 +75,9 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const [isListening, setIsListening] = useState(false);
   const [audioStreamState, setAudioStreamState] = useState<AudioStreamState | null>(null);
   const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
-  const [processor, setProcessor] = useState<ScriptProcessorNode | null>(null);
+  const [processor, setProcessor] = useState<ScriptProcessorNode | AudioWorkletNode | null>(null);
+  const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | null>(null);
+  const [pollingInterval, setPollingInterval] = useState<number | null>(null);
   const audioChunks = useRef<Blob[]>([]);
 
   // Remove all chat-related state, handlers, and the Dialog overlay from this file.
@@ -244,49 +246,161 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       const ctx = new AudioContext({ sampleRate: 16000 });
       console.log('[QueueCommands] AudioContext created, state:', ctx.state);
       
+      // Resume context if suspended (required by some browsers)
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+        console.log('[QueueCommands] AudioContext resumed');
+      }
+      
       const source = ctx.createMediaStreamSource(stream);
       console.log('[QueueCommands] Media stream source created');
       
-      // Create script processor for chunking
-      const scriptProcessor = ctx.createScriptProcessor(4096, 1, 1);
-      console.log('[QueueCommands] Script processor created');
-      
-      let chunkCount = 0;
-      scriptProcessor.onaudioprocess = async (event) => {
-        chunkCount++;
-        console.log(`[QueueCommands] Audio process event ${chunkCount}, isListening:`, isListening);
+      try {
+        // Try modern AudioWorklet API first
+        await ctx.audioWorklet.addModule('/audio-worklet-processor.js');
+        const workletNode = new AudioWorkletNode(ctx, 'audio-capture-processor');
         
-        if (!isListening) {
-          console.log('[QueueCommands] Not listening, dropping audio chunk');
-          return;
+        let chunkCount = 0;
+        workletNode.port.onmessage = async (event) => {
+          chunkCount++;
+          const { data: inputData } = event.data;
+          
+          console.log(`[QueueCommands] Audio worklet event ${chunkCount}, isListening:`, isListening);
+          
+          if (!isListening) {
+            console.log('[QueueCommands] Not listening, dropping audio chunk');
+            return;
+          }
+          
+          // Check for actual audio data
+          const hasAudio = inputData.some(sample => Math.abs(sample) > 0.001);
+          console.log('[QueueCommands] Audio chunk - samples:', inputData.length, 'hasAudio:', hasAudio);
+          
+          if (hasAudio) {
+            // Send Float32Array directly as expected by the preload API
+            try {
+              console.log('[QueueCommands] Sending audio chunk to main process...');
+              await window.electronAPI.audioStreamProcessChunk(inputData);
+              console.log('[QueueCommands] Audio chunk sent successfully');
+            } catch (error) {
+              console.error('[QueueCommands] Error sending audio chunk:', error);
+              window.electronAPI.invoke('debug-log', '[QueueCommands] Error sending audio chunk: ' + error);
+              setIsListening(false);
+              stopAudioCapture();
+            }
+          }
+        };
+        
+        source.connect(workletNode);
+        workletNode.connect(ctx.destination);
+        
+        setAudioContext(ctx);
+        setProcessor(workletNode as any);
+        
+        console.log('[QueueCommands] AudioWorklet setup completed');
+        
+      } catch (workletError) {
+        console.warn('[QueueCommands] AudioWorklet failed, falling back to ScriptProcessor:', workletError);
+        
+        // Fallback to ScriptProcessorNode
+        const scriptProcessor = ctx.createScriptProcessor(4096, 1, 1);
+        console.log('[QueueCommands] Script processor created as fallback');
+        
+        let chunkCount = 0;
+        scriptProcessor.onaudioprocess = async (event) => {
+          chunkCount++;
+          console.log(`[QueueCommands] Audio process event ${chunkCount}, isListening:`, isListening);
+          
+          if (!isListening) {
+            console.log('[QueueCommands] Not listening, dropping audio chunk');
+            return;
+          }
+          
+          const inputBuffer = event.inputBuffer;
+          const inputData = inputBuffer.getChannelData(0);
+          
+          // Check for actual audio data
+          const hasAudio = inputData.some(sample => Math.abs(sample) > 0.001);
+          console.log('[QueueCommands] Audio chunk - samples:', inputData.length, 'hasAudio:', hasAudio);
+          
+          if (hasAudio) {
+            // Send Float32Array directly as expected by the preload API
+            try {
+              console.log('[QueueCommands] Sending audio chunk to main process...');
+              await window.electronAPI.audioStreamProcessChunk(inputData);
+              console.log('[QueueCommands] Audio chunk sent successfully');
+            } catch (error) {
+              console.error('[QueueCommands] Error sending audio chunk:', error);
+              window.electronAPI.invoke('debug-log', '[QueueCommands] Error sending audio chunk: ' + error);
+              setIsListening(false);
+              stopAudioCapture();
+            }
+          }
+        };
+        
+        source.connect(scriptProcessor);
+        scriptProcessor.connect(ctx.destination);
+        
+        setAudioContext(ctx);
+        setProcessor(scriptProcessor);
+        
+        console.log('[QueueCommands] ScriptProcessor fallback setup completed');
+      }
+      
+      // If we still don't have audio processing after 2 seconds, try AnalyserNode polling fallback
+      setTimeout(() => {
+        if (isListening && !audioAnalyser) {
+          console.log('[QueueCommands] Setting up AnalyserNode polling fallback...');
+          window.electronAPI.invoke('debug-log', '[QueueCommands] Setting up AnalyserNode polling fallback...');
+          
+          try {
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 2048;
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Float32Array(bufferLength);
+            
+            source.connect(analyser);
+            setAudioAnalyser(analyser);
+            
+            // Poll for audio data every 100ms
+            const interval = setInterval(async () => {
+              if (!isListening) {
+                clearInterval(interval);
+                return;
+              }
+              
+              analyser.getFloatTimeDomainData(dataArray);
+              
+              // Check for actual audio data
+              const hasAudio = dataArray.some((sample: number) => Math.abs(sample) > 0.001);
+              
+              if (hasAudio) {
+                console.log('[QueueCommands] AnalyserNode detected audio, samples:', dataArray.length);
+                window.electronAPI.invoke('debug-log', '[QueueCommands] AnalyserNode detected audio, samples: ' + dataArray.length);
+                
+                try {
+                  await window.electronAPI.audioStreamProcessChunk(dataArray);
+                  console.log('[QueueCommands] AnalyserNode audio chunk sent successfully');
+                } catch (error) {
+                  console.error('[QueueCommands] AnalyserNode error sending audio chunk:', error);
+                  window.electronAPI.invoke('debug-log', '[QueueCommands] AnalyserNode error: ' + error);
+                  clearInterval(interval);
+                  setIsListening(false);
+                  stopAudioCapture();
+                }
+              }
+            }, 100); // Poll every 100ms
+            
+            setPollingInterval(interval);
+            console.log('[QueueCommands] AnalyserNode polling started');
+            window.electronAPI.invoke('debug-log', '[QueueCommands] AnalyserNode polling started');
+            
+          } catch (analyserError) {
+            console.error('[QueueCommands] Failed to setup AnalyserNode:', analyserError);
+            window.electronAPI.invoke('debug-log', '[QueueCommands] Failed to setup AnalyserNode: ' + analyserError);
+          }
         }
-        
-        const inputBuffer = event.inputBuffer;
-        const inputData = inputBuffer.getChannelData(0);
-        
-        // Check for actual audio data
-        const hasAudio = inputData.some(sample => Math.abs(sample) > 0.001);
-        console.log('[QueueCommands] Audio chunk - samples:', inputData.length, 'hasAudio:', hasAudio);
-        
-        // Send Float32Array directly as expected by the preload API
-        try {
-          console.log('[QueueCommands] Sending audio chunk to main process...');
-          await window.electronAPI.audioStreamProcessChunk(inputData);
-          console.log('[QueueCommands] Audio chunk sent successfully');
-        } catch (error) {
-          console.error('[QueueCommands] Error sending audio chunk:', error);
-          // Also log to main process
-          window.electronAPI.invoke('debug-log', '[QueueCommands] Error sending audio chunk: ' + error);
-          setIsListening(false);
-          stopAudioCapture();
-        }
-      };
-      
-      source.connect(scriptProcessor);
-      scriptProcessor.connect(ctx.destination);
-      
-      setAudioContext(ctx);
-      setProcessor(scriptProcessor);
+      }, 2000);
       
       console.log('[QueueCommands] Audio capture setup completed successfully');
       // Also log to main process for terminal visibility
@@ -307,6 +421,16 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
    */
   const stopAudioCapture = (): void => {
     try {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+        setPollingInterval(null);
+      }
+      
+      if (audioAnalyser) {
+        audioAnalyser.disconnect();
+        setAudioAnalyser(null);
+      }
+      
       if (processor) {
         processor.disconnect();
         setProcessor(null);
@@ -318,9 +442,11 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       }
       
       console.log('[QueueCommands] Audio capture stopped');
+      window.electronAPI.invoke('debug-log', '[QueueCommands] Audio capture stopped');
       
     } catch (error) {
       console.error('[QueueCommands] Error stopping audio capture:', error);
+      window.electronAPI.invoke('debug-log', '[QueueCommands] Error stopping audio capture: ' + error);
     }
   };
 
