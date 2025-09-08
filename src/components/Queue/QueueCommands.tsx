@@ -78,7 +78,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const [processor, setProcessor] = useState<ScriptProcessorNode | AudioWorkletNode | null>(null);
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | null>(null);
   const [pollingInterval, setPollingInterval] = useState<number | null>(null);
-  const [frontendListening, setFrontendListening] = useState(false); // Local listening state to avoid React delays
+  const frontendListeningRef = useRef(false); // Local listening state to avoid React delays - using ref to prevent stale closure
   const audioChunks = useRef<Blob[]>([]);
 
   // Remove all chat-related state, handlers, and the Dialog overlay from this file.
@@ -288,10 +288,11 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           
           if (type === 'audio-chunk') {
             chunkCount++;
-            console.log(`[QueueCommands] Received audio chunk ${chunkCount}, frontendListening:`, frontendListening, 'reactIsListening:', isListening, 'length:', length, 'duration:', durationMs + 'ms', 'trigger:', triggerReason);
-            window.electronAPI.invoke('debug-log', `[QueueCommands] Audio chunk ${chunkCount}, duration: ${durationMs}ms, trigger: ${triggerReason}, frontendListening: ${frontendListening}`);
+            const currentlyListening = frontendListeningRef.current;
+            console.log(`[QueueCommands] Received audio chunk ${chunkCount}, frontendListening:`, currentlyListening, 'reactIsListening:', isListening, 'length:', length, 'duration:', durationMs + 'ms', 'trigger:', triggerReason);
+            window.electronAPI.invoke('debug-log', `[QueueCommands] Audio chunk ${chunkCount}, duration: ${durationMs}ms, trigger: ${triggerReason}, frontendListening: ${currentlyListening}`);
             
-            if (!frontendListening) {
+            if (!currentlyListening) {
               console.log('[QueueCommands] Not listening (frontendListening=false), dropping audio chunk');
               window.electronAPI.invoke('debug-log', '[QueueCommands] Dropping chunk - not listening');
               return;
@@ -338,7 +339,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         setProcessor(workletNode as any);
         
         // Set the local listening flag
-        setFrontendListening(true);
+        frontendListeningRef.current = true;
         console.log('[QueueCommands] Set frontendListening to true');
         window.electronAPI.invoke('debug-log', '[QueueCommands] Set frontendListening to true');
         
@@ -426,7 +427,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const stopAudioCapture = (): void => {
     try {
       // Clear frontend listening flag first
-      setFrontendListening(false);
+      frontendListeningRef.current = false;
       console.log('[QueueCommands] Set frontendListening to false');
       window.electronAPI.invoke('debug-log', '[QueueCommands] Set frontendListening to false');
       
