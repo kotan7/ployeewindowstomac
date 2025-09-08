@@ -254,9 +254,23 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       
       const source = ctx.createMediaStreamSource(stream);
       console.log('[QueueCommands] Media stream source created');
+      window.electronAPI.invoke('debug-log', '[QueueCommands] Media stream source created');
+      
+      // Test if we can get any audio data from the stream
+      const track = stream.getAudioTracks()[0];
+      console.log('[QueueCommands] Audio track info:', {
+        enabled: track.enabled,
+        readyState: track.readyState,
+        muted: track.muted,
+        settings: track.getSettings()
+      });
+      window.electronAPI.invoke('debug-log', '[QueueCommands] Audio track - enabled: ' + track.enabled + ', readyState: ' + track.readyState + ', muted: ' + track.muted);
       
       try {
         // Try modern AudioWorklet API first
+        console.log('[QueueCommands] About to attempt AudioWorklet setup...');
+        window.electronAPI.invoke('debug-log', '[QueueCommands] About to attempt AudioWorklet setup...');
+        
         await ctx.audioWorklet.addModule('/audio-worklet-processor.js');
         const workletNode = new AudioWorkletNode(ctx, 'audio-capture-processor');
         
@@ -298,6 +312,13 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         setProcessor(workletNode as any);
         
         console.log('[QueueCommands] AudioWorklet setup completed');
+        window.electronAPI.invoke('debug-log', '[QueueCommands] AudioWorklet setup completed');
+        
+        // Test worklet immediately
+        setTimeout(() => {
+          console.log('[QueueCommands] Testing AudioWorklet after 1 second...');
+          window.electronAPI.invoke('debug-log', '[QueueCommands] Testing AudioWorklet after 1 second...');
+        }, 1000);
         
       } catch (workletError) {
         console.warn('[QueueCommands] AudioWorklet failed, falling back to ScriptProcessor:', workletError);
@@ -345,6 +366,13 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         setProcessor(scriptProcessor);
         
         console.log('[QueueCommands] ScriptProcessor fallback setup completed');
+        window.electronAPI.invoke('debug-log', '[QueueCommands] ScriptProcessor fallback setup completed');
+        
+        // Test script processor immediately
+        setTimeout(() => {
+          console.log('[QueueCommands] Testing ScriptProcessor after 1 second...');
+          window.electronAPI.invoke('debug-log', '[QueueCommands] Testing ScriptProcessor after 1 second...');
+        }, 1000);
       }
       
       // If we still don't have audio processing after 2 seconds, try AnalyserNode polling fallback
