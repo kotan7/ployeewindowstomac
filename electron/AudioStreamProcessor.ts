@@ -32,9 +32,16 @@ export class AudioStreamProcessor extends EventEmitter {
   private lastSilenceTime: number = 0;
   private wordCount: number = 0;
   private tempBuffer: Float32Array | null = null;
+  private lastChunkTime: number = 0;
+  private accumulatedSamples: number = 0;
 
   constructor(openaiApiKey: string, config?: Partial<AudioStreamConfig>) {
     super();
+    
+    // Validate OpenAI API key
+    if (!openaiApiKey || openaiApiKey.trim() === '') {
+      throw new Error('OpenAI API key is required for AudioStreamProcessor');
+    }
     
     this.openai = new OpenAI({ apiKey: openaiApiKey });
     this.questionDetector = new QuestionDetector();
@@ -64,6 +71,7 @@ export class AudioStreamProcessor extends EventEmitter {
     };
 
     this.setupBatchProcessor();
+    console.log('[AudioStreamProcessor] Initialized with OpenAI API key');
   }
 
   /**
@@ -134,18 +142,37 @@ export class AudioStreamProcessor extends EventEmitter {
   /**
    * Process audio data chunk received from renderer
    */
-  public async processAudioChunk(audioData: Float32Array): Promise<void> {
-    if (!this.state.isListening) return;
+  public async processAudioChunk(audioData: Buffer): Promise<void> {
+    if (!this.state.isListening) {
+      console.log('[AudioStreamProcessor] Not listening, ignoring audio chunk');
+      return;
+    }
 
     try {
+      console.log('[AudioStreamProcessor] Processing audio chunk of size:', audioData.length);
+      
+      // Convert Buffer to Float32Array
+      const float32Array = new Float32Array(audioData.length / 2);
+      for (let i = 0; i < float32Array.length; i++) {
+        const sample = audioData.readInt16LE(i * 2);
+        float32Array[i] = sample / 32768.0; // Convert from 16-bit PCM to float
+      }
+      
       // Add to current audio accumulation
-      this.currentAudioData.push(audioData);
+      this.currentAudioData.push(float32Array);
+      this.accumulatedSamples += float32Array.length;
       this.state.lastActivityTime = Date.now();
+      
+      // Initialize last chunk time if not set
+      if (this.lastChunkTime === 0) {
+        this.lastChunkTime = Date.now();
+      }
       
       // Check if we should create a chunk based on duration or word count
       const shouldCreateChunk = await this.shouldCreateChunk();
       
       if (shouldCreateChunk) {
+        console.log('[AudioStreamProcessor] Creating and processing chunk');
         await this.createAndProcessChunk();
       }
       
@@ -162,10 +189,28 @@ export class AudioStreamProcessor extends EventEmitter {
    */
   private async shouldCreateChunk(): Promise<boolean> {
     const now = Date.now();
-    const silenceDuration = now - this.state.lastActivityTime;
     
-    // Create chunk if silence exceeds threshold OR word count exceeds limit
-    return silenceDuration > this.config.silenceThreshold || this.wordCount >= this.config.maxWords;
+    // Calculate time since last chunk
+    const timeSinceLastChunk = now - this.lastChunkTime;
+    
+    // Calculate accumulated audio duration (assuming 16kHz sample rate)
+    const accumulatedDuration = (this.accumulatedSamples / this.config.sampleRate) * 1000; // in ms
+    
+    // Create chunk if:
+    // 1. We have accumulated enough audio (5+ seconds) OR
+    // 2. We haven't created a chunk in a while (10+ seconds) OR  
+    // 3. Word count exceeds limit
+    const shouldCreateByDuration = accumulatedDuration >= 5000; // 5 seconds
+    const shouldCreateByTime = timeSinceLastChunk >= 10000; // 10 seconds
+    const shouldCreateByWords = this.wordCount >= this.config.maxWords;
+    
+    const shouldCreate = shouldCreateByDuration || shouldCreateByTime || shouldCreateByWords;
+    
+    if (shouldCreate) {
+      console.log('[AudioStreamProcessor] Creating chunk - Duration:', accumulatedDuration.toFixed(0), 'ms, Time since last:', timeSinceLastChunk.toFixed(0), 'ms, Words:', this.wordCount);
+    }
+    
+    return shouldCreate;
   }
 
   /**
@@ -204,6 +249,8 @@ export class AudioStreamProcessor extends EventEmitter {
       // Reset accumulation
       this.currentAudioData = [];
       this.wordCount = 0;
+      this.accumulatedSamples = 0;
+      this.lastChunkTime = Date.now();
       
       this.emit('chunk-recorded', chunk);
       
@@ -222,9 +269,19 @@ export class AudioStreamProcessor extends EventEmitter {
    * Transcribe audio chunk using OpenAI Whisper
    */
   private async transcribeChunk(chunk: AudioChunk): Promise<void> {
-    if (!this.config.questionDetectionEnabled) return;
+    if (!this.config.questionDetectionEnabled) {
+      console.log('[AudioStreamProcessor] Question detection disabled, skipping transcription');
+      return;
+    }
 
     try {
+      console.log('[AudioStreamProcessor] Starting transcription for chunk:', {
+        id: chunk.id,
+        duration: chunk.duration,
+        dataLength: chunk.data.length,
+        timestamp: chunk.timestamp
+      });
+      
       this.state.isProcessing = true;
       this.emit('state-changed', { ...this.state });
 
@@ -235,7 +292,10 @@ export class AudioStreamProcessor extends EventEmitter {
         const value = Math.floor(sample < 0 ? sample * 32768 : sample * 32767);
         pcmBuffer.writeInt16LE(value, i * 2);
       }
+      
+      console.log('[AudioStreamProcessor] Created PCM buffer, size:', pcmBuffer.length);
       const tempFilePath = await this.createTempAudioFile(pcmBuffer);
+      console.log('[AudioStreamProcessor] Created temp file:', tempFilePath);
       
       const transcription = await this.openai.audio.transcriptions.create({
         file: fs.createReadStream(tempFilePath),
@@ -243,6 +303,11 @@ export class AudioStreamProcessor extends EventEmitter {
         language: "ja", // Japanese language preference from memory
         response_format: "json",
         temperature: 0.2
+      });
+      
+      console.log('[AudioStreamProcessor] Whisper transcription result:', {
+        text: transcription.text,
+        textLength: transcription.text?.length || 0
       });
 
       // Clean up temp file
@@ -261,7 +326,10 @@ export class AudioStreamProcessor extends EventEmitter {
 
       // Detect questions in transcription
       if (result.text.trim()) {
+        console.log('[AudioStreamProcessor] Processing transcription for questions:', result.text);
         await this.detectQuestions(result);
+      } else {
+        console.log('[AudioStreamProcessor] No text in transcription result');
       }
 
     } catch (error) {

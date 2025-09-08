@@ -97,22 +97,91 @@ export class AppState {
 
     // Initialize AudioStreamProcessor
     const openaiApiKey = process.env.OPENAI_API_KEY
+    console.log('[AppState] OpenAI API Key status:', openaiApiKey ? 'Present' : 'Missing')
+    console.log('[AppState] Environment variables loaded:', {
+      NODE_ENV: process.env.NODE_ENV,
+      GEMINI_API_KEY: process.env.GEMINI_API_KEY ? 'Present' : 'Missing',
+      OPENAI_API_KEY: openaiApiKey ? 'Present' : 'Missing'
+    })
     if (!openaiApiKey) {
       console.warn('[AppState] OPENAI_API_KEY not found - audio streaming will be disabled')
-      // Create a placeholder that throws errors if used
-      this.audioStreamProcessor = new AudioStreamProcessor('', {})
+      // Create a disabled processor that logs warnings
+      this.audioStreamProcessor = {
+        async startListening() {
+          console.warn('[AudioStreamProcessor] Cannot start - OpenAI API key not configured')
+          return Promise.resolve()
+        },
+        async stopListening() {
+          return Promise.resolve()
+        },
+        async processAudioChunk() {
+          console.warn('[AudioStreamProcessor] Cannot process audio - OpenAI API key not configured')
+          return Promise.resolve()
+        },
+        getState() {
+          return {
+            isListening: false,
+            isProcessing: false,
+            lastActivityTime: 0,
+            questionBuffer: [],
+            batchProcessor: {
+              lastBatchTime: 0,
+              isProcessing: false,
+              pendingQuestions: []
+            }
+          }
+        },
+        getQuestions() { return [] },
+        clearQuestions() {},
+        setLLMHelper() {},
+        on() { return this },
+        emit() { return false }
+      } as any
     } else {
-      this.audioStreamProcessor = new AudioStreamProcessor(openaiApiKey, {
-        questionDetectionEnabled: true,
-        batchInterval: 30000, // 30 seconds from memory
-        maxBatchSize: 3
-      })
-      
-      // Set LLMHelper for question refinement
-      this.audioStreamProcessor.setLLMHelper(this.processingHelper.getLLMHelper())
-      
-      // Setup event listeners for audio stream events
-      this.setupAudioStreamEvents()
+      try {
+        this.audioStreamProcessor = new AudioStreamProcessor(openaiApiKey, {
+          questionDetectionEnabled: true,
+          batchInterval: 30000, // 30 seconds from memory
+          maxBatchSize: 3
+        })
+        
+        // Set LLMHelper for question refinement
+        this.audioStreamProcessor.setLLMHelper(this.processingHelper.getLLMHelper())
+        
+        // Setup event listeners for audio stream events
+        this.setupAudioStreamEvents()
+        
+        console.log('[AppState] AudioStreamProcessor initialized successfully')
+      } catch (error) {
+        console.error('[AppState] Failed to initialize AudioStreamProcessor:', error)
+        // Fall back to disabled processor
+        this.audioStreamProcessor = {
+          async startListening() {
+            console.error('[AudioStreamProcessor] Initialization failed - audio features disabled')
+            return Promise.resolve()
+          },
+          async stopListening() { return Promise.resolve() },
+          async processAudioChunk() { return Promise.resolve() },
+          getState() {
+            return {
+              isListening: false,
+              isProcessing: false,
+              lastActivityTime: 0,
+              questionBuffer: [],
+              batchProcessor: {
+                lastBatchTime: 0,
+                isProcessing: false,
+                pendingQuestions: []
+              }
+            }
+          },
+          getQuestions() { return [] },
+          clearQuestions() {},
+          setLLMHelper() {},
+          on() { return this },
+          emit() { return false }
+        } as any
+      }
     }
 
     // Initialize ShortcutsHelper

@@ -242,9 +242,19 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         const inputBuffer = event.inputBuffer;
         const inputData = inputBuffer.getChannelData(0);
         
-        // Send Float32Array directly to main process
+        // Convert Float32Array to Buffer for IPC transmission
+        const buffer = new ArrayBuffer(inputData.length * 2);
+        const view = new Int16Array(buffer);
+        
+        // Convert float samples to 16-bit PCM
+        for (let i = 0; i < inputData.length; i++) {
+          view[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+        }
+        
+        // Send Buffer to main process for processing
         try {
-          await window.electronAPI.audioStreamProcessChunk(inputData);
+          console.log('[QueueCommands] Sending audio chunk, size:', buffer.byteLength);
+          await window.electronAPI.audioStreamProcessChunk(Buffer.from(buffer));
         } catch (error) {
           console.error('[QueueCommands] Error sending audio chunk:', error);
           setIsListening(false);

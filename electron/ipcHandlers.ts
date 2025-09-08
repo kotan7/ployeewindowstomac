@@ -408,8 +408,9 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  ipcMain.handle("audio-stream-process-chunk", async (event, audioData: Float32Array) => {
+  ipcMain.handle("audio-stream-process-chunk", async (event, audioData: Buffer) => {
     try {
+      console.log('[IPC] Received audio chunk, size:', audioData.length);
       await appState.audioStreamProcessor.processAudioChunk(audioData);
       return { success: true };
     } catch (error: any) {
