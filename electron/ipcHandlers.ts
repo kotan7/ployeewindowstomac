@@ -408,10 +408,18 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  ipcMain.handle("audio-stream-process-chunk", async (event, audioData: Buffer) => {
+  ipcMain.handle("audio-stream-process-chunk", async (event, audioData: Float32Array) => {
     try {
-      console.log('[IPC] Received audio chunk, size:', audioData.length);
-      await appState.audioStreamProcessor.processAudioChunk(audioData);
+      console.log('[IPC] Received audio chunk, samples:', audioData.length);
+      
+      // Convert Float32Array to Buffer for AudioStreamProcessor
+      const buffer = Buffer.alloc(audioData.length * 2);
+      for (let i = 0; i < audioData.length; i++) {
+        const sample = Math.max(-32768, Math.min(32767, audioData[i] * 32768));
+        buffer.writeInt16LE(sample, i * 2);
+      }
+      
+      await appState.audioStreamProcessor.processAudioChunk(buffer);
       return { success: true };
     } catch (error: any) {
       console.error("Error processing audio chunk:", error);

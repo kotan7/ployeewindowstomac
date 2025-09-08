@@ -242,19 +242,10 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         const inputBuffer = event.inputBuffer;
         const inputData = inputBuffer.getChannelData(0);
         
-        // Convert Float32Array to Buffer for IPC transmission
-        const buffer = new ArrayBuffer(inputData.length * 2);
-        const view = new Int16Array(buffer);
-        
-        // Convert float samples to 16-bit PCM
-        for (let i = 0; i < inputData.length; i++) {
-          view[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-        }
-        
-        // Send Buffer to main process for processing
+        // Send Float32Array directly as expected by the preload API
         try {
-          console.log('[QueueCommands] Sending audio chunk, size:', buffer.byteLength);
-          await window.electronAPI.audioStreamProcessChunk(Buffer.from(buffer));
+          console.log('[QueueCommands] Sending audio chunk, samples:', inputData.length);
+          await window.electronAPI.audioStreamProcessChunk(inputData);
         } catch (error) {
           console.error('[QueueCommands] Error sending audio chunk:', error);
           setIsListening(false);
@@ -268,12 +259,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       setAudioContext(ctx);
       setProcessor(scriptProcessor);
       
-      const { success, error } = await window.electronAPI.audioStreamStart();
-      if (!success) {
-        throw new Error(error || 'Failed to start audio stream');
-      }
-      
-      console.log('[QueueCommands] Audio capture started successfully');
+      console.log('[QueueCommands] Audio capture setup completed');
       
     } catch (error) {
       console.error('[QueueCommands] Failed to start audio capture:', error);
@@ -331,20 +317,30 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         // Start listening
         console.log('[QueueCommands] Starting audio listening...');
         
-        setIsListening(true);
-        
-        // Start audio stream processor
-        const result = await window.electronAPI.audioStreamStart();
-        if (!result.success) {
-          console.error('[QueueCommands] Failed to start audio stream:', result.error);
+        try {
+          // Step 1: Start local audio capture FIRST
+          await startAudioCapture();
+          console.log('[QueueCommands] Audio capture initialized');
+          
+          // Step 2: Start audio stream processor AFTER capture is ready
+          const result = await window.electronAPI.audioStreamStart();
+          if (!result.success) {
+            console.error('[QueueCommands] Failed to start audio stream:', result.error);
+            setIsListening(false);
+            stopAudioCapture();
+            return;
+          }
+          
+          // Step 3: Set listening state only after both are successful
+          setIsListening(true);
+          console.log('[QueueCommands] Audio listening started successfully');
+          
+        } catch (error) {
+          console.error('[QueueCommands] Failed to start audio listening:', error);
           setIsListening(false);
-          return;
+          stopAudioCapture();
+          throw error;
         }
-        
-        // Start local audio capture
-        await startAudioCapture();
-        
-        console.log('[QueueCommands] Audio listening started successfully');
       }
       
     } catch (error) {
