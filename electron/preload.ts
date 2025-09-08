@@ -183,6 +183,45 @@ contextBridge.exposeInMainWorld("electronAPI", {
   quitApp: () => ipcRenderer.invoke("quit-app"),
   invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
   
+  // Audio Stream methods
+  audioStreamStart: () => ipcRenderer.invoke("audio-stream-start"),
+  audioStreamStop: () => ipcRenderer.invoke("audio-stream-stop"),
+  audioStreamProcessChunk: (audioData: Buffer) => ipcRenderer.invoke("audio-stream-process-chunk", audioData),
+  audioStreamGetState: () => ipcRenderer.invoke("audio-stream-get-state"),
+  audioStreamGetQuestions: () => ipcRenderer.invoke("audio-stream-get-questions"),
+  audioStreamClearQuestions: () => ipcRenderer.invoke("audio-stream-clear-questions"),
+  audioStreamAnswerQuestion: (questionText: string, collectionId?: string) => ipcRenderer.invoke("audio-stream-answer-question", questionText, collectionId),
+  
+  // Audio Stream event listeners
+  onAudioQuestionDetected: (callback: (question: any) => void) => {
+    const subscription = (_: any, question: any) => callback(question)
+    ipcRenderer.on("audio-question-detected", subscription)
+    return () => {
+      ipcRenderer.removeListener("audio-question-detected", subscription)
+    }
+  },
+  onAudioBatchProcessed: (callback: (questions: any[]) => void) => {
+    const subscription = (_: any, questions: any[]) => callback(questions)
+    ipcRenderer.on("audio-batch-processed", subscription)
+    return () => {
+      ipcRenderer.removeListener("audio-batch-processed", subscription)
+    }
+  },
+  onAudioStreamStateChanged: (callback: (state: any) => void) => {
+    const subscription = (_: any, state: any) => callback(state)
+    ipcRenderer.on("audio-stream-state-changed", subscription)
+    return () => {
+      ipcRenderer.removeListener("audio-stream-state-changed", subscription)
+    }
+  },
+  onAudioStreamError: (callback: (error: string) => void) => {
+    const subscription = (_: any, error: string) => callback(error)
+    ipcRenderer.on("audio-stream-error", subscription)
+    return () => {
+      ipcRenderer.removeListener("audio-stream-error", subscription)
+    }
+  },
+  
   // Auth methods
   authSignIn: (email: string, password: string) => ipcRenderer.invoke("auth-sign-in", email, password),
   authSignUp: (email: string, password: string) => ipcRenderer.invoke("auth-sign-up", email, password),

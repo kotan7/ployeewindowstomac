@@ -7,6 +7,10 @@ import { ProcessingHelper } from "./ProcessingHelper"
 import { AuthService } from "./AuthService"
 import { QnAService } from "./QnAService"
 import { UsageTracker } from "./UsageTracker"
+import { AudioStreamProcessor } from "./AudioStreamProcessor"
+import dotenv from "dotenv"
+
+dotenv.config()
 
 export class AppState {
   private static instance: AppState | null = null
@@ -18,6 +22,7 @@ export class AppState {
   public authService: AuthService
   public qnaService: QnAService
   public usageTracker: UsageTracker
+  public audioStreamProcessor: AudioStreamProcessor
   private tray: Tray | null = null
 
   // View management
@@ -89,6 +94,26 @@ export class AppState {
 
     // Set QnAService in ProcessingHelper's LLMHelper
     this.processingHelper.getLLMHelper().setQnAService(this.qnaService)
+
+    // Initialize AudioStreamProcessor
+    const openaiApiKey = process.env.OPENAI_API_KEY
+    if (!openaiApiKey) {
+      console.warn('[AppState] OPENAI_API_KEY not found - audio streaming will be disabled')
+      // Create a placeholder that throws errors if used
+      this.audioStreamProcessor = new AudioStreamProcessor('', {})
+    } else {
+      this.audioStreamProcessor = new AudioStreamProcessor(openaiApiKey, {
+        questionDetectionEnabled: true,
+        batchInterval: 30000, // 30 seconds from memory
+        maxBatchSize: 3
+      })
+      
+      // Set LLMHelper for question refinement
+      this.audioStreamProcessor.setLLMHelper(this.processingHelper.getLLMHelper())
+      
+      // Setup event listeners for audio stream events
+      this.setupAudioStreamEvents()
+    }
 
     // Initialize ShortcutsHelper
     this.shortcutsHelper = new ShortcutsHelper(this)
@@ -299,6 +324,40 @@ export class AppState {
 
   public getHasDebugged(): boolean {
     return this.hasDebugged
+  }
+
+  /**
+   * Setup event listeners for AudioStreamProcessor events
+   */
+  private setupAudioStreamEvents(): void {
+    if (!this.audioStreamProcessor) return;
+    
+    const mainWindow = this.getMainWindow();
+    if (!mainWindow) {
+      // Delay setup until window is available
+      setTimeout(() => this.setupAudioStreamEvents(), 1000);
+      return;
+    }
+
+    // Forward audio stream events to renderer process
+    this.audioStreamProcessor.on('question-detected', (question) => {
+      mainWindow.webContents.send('audio-question-detected', question);
+    });
+
+    this.audioStreamProcessor.on('batch-processed', (questions) => {
+      mainWindow.webContents.send('audio-batch-processed', questions);
+    });
+
+    this.audioStreamProcessor.on('state-changed', (state) => {
+      mainWindow.webContents.send('audio-stream-state-changed', state);
+    });
+
+    this.audioStreamProcessor.on('error', (error) => {
+      console.error('[AppState] Audio stream error:', error);
+      mainWindow.webContents.send('audio-stream-error', error.message);
+    });
+
+    console.log('[AppState] Audio stream event listeners setup complete');
   }
 }
 

@@ -1,4 +1,6 @@
-export interface ElectronAPI {
+export import { AudioStreamState, DetectedQuestion } from './audio-stream'
+
+interface ElectronAPI {
   updateContentDimensions: (dimensions: {
     width: number
     height: number
@@ -33,6 +35,21 @@ export interface ElectronAPI {
   authGetState: () => Promise<{ user: any | null; session: any | null; isLoading: boolean }>
   authResetPassword: (email: string) => Promise<{ success: boolean; error?: string }>
   onAuthStateChange: (callback: (state: { user: any | null; session: any | null; isLoading: boolean }) => void) => () => void
+  
+  // Audio Stream methods
+  audioStreamStart: () => Promise<{ success: boolean; error?: string }>
+  audioStreamStop: () => Promise<{ success: boolean; error?: string }>
+  audioStreamProcessChunk: (audioData: Buffer) => Promise<{ success: boolean; error?: string }>
+  audioStreamGetState: () => Promise<AudioStreamState>
+  audioStreamGetQuestions: () => Promise<DetectedQuestion[]>
+  audioStreamClearQuestions: () => Promise<{ success: boolean; error?: string }>
+  audioStreamAnswerQuestion: (questionText: string, collectionId?: string) => Promise<{ response: string; timestamp: number }>
+  
+  // Audio Stream event listeners
+  onAudioQuestionDetected: (callback: (question: DetectedQuestion) => void) => () => void
+  onAudioBatchProcessed: (callback: (questions: DetectedQuestion[]) => void) => () => void
+  onAudioStreamStateChanged: (callback: (state: AudioStreamState) => void) => () => void
+  onAudioStreamError: (callback: (error: string) => void) => () => void
 }
 
 declare global {

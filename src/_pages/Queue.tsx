@@ -11,6 +11,8 @@ import {
   ToastMessage,
 } from "../components/ui/toast";
 import QueueCommands from "../components/Queue/QueueCommands";
+import QuestionSidePanel from "../components/AudioListener/QuestionSidePanel";
+import { DetectedQuestion, AudioStreamState } from "../types/audio-stream";
 
 interface ResponseMode {
   type: "plain" | "qna";
@@ -53,6 +55,11 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
   const [responseMode, setResponseMode] = useState<ResponseMode>({
     type: "plain",
   });
+
+  // Audio stream state
+  const [detectedQuestions, setDetectedQuestions] = useState<DetectedQuestion[]>([]);
+  const [audioStreamState, setAudioStreamState] = useState<AudioStreamState | null>(null);
+  const [isQuestionPanelCollapsed, setIsQuestionPanelCollapsed] = useState(true);
 
   const barRef = useRef<HTMLDivElement>(null);
 
@@ -301,6 +308,55 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
     setResponseMode(mode);
   };
 
+  // Audio stream event handlers
+  const handleQuestionDetected = (question: DetectedQuestion) => {
+    console.log('[Queue] Question detected:', question);
+    setDetectedQuestions(prev => [...prev, question]);
+  };
+
+  const handleAudioStreamStateChange = (state: AudioStreamState) => {
+    console.log('[Queue] Audio stream state changed:', state);
+    setAudioStreamState(state);
+  };
+
+  const handleAnswerQuestion = async (question: DetectedQuestion, collectionId?: string): Promise<void> => {
+    try {
+      console.log('[Queue] Answering question:', question.text, 'with collection:', collectionId);
+      
+      const result = await window.electronAPI.audioStreamAnswerQuestion(
+        question.text, 
+        collectionId
+      );
+      
+      console.log('[Queue] Question answered:', result);
+      
+      // Show answer in chat
+      setChatMessages(prev => [
+        ...prev,
+        { role: "user", text: question.text },
+        { role: "gemini", text: result.response }
+      ]);
+      
+    } catch (error: any) {
+      console.error('[Queue] Failed to answer question:', error);
+      
+      // Handle usage limit errors
+      if (error.message && (
+        error.message.includes('Usage limit exceeded') ||
+        error.message.includes('Monthly limit') ||
+        error.message.includes('Insufficient usage remaining')
+      )) {
+        handleUsageLimitError();
+      } else {
+        setChatMessages(prev => [
+          ...prev,
+          { role: "user", text: question.text },
+          { role: "gemini", text: "エラー: " + error.message }
+        ]);
+      }
+    }
+  };
+
   // Keyboard shortcuts handler
   useEffect(() => {
     // Handle voice recording trigger
@@ -399,6 +455,8 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
                 responseMode={responseMode}
                 onResponseModeChange={handleResponseModeChange}
                 isAuthenticated={true} // User is always authenticated when Queue is rendered
+                onQuestionDetected={handleQuestionDetected}
+                onAudioStreamStateChange={handleAudioStreamStateChange}
               />
             </div>
 
@@ -597,6 +655,21 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
                   </svg>
                 </button>
               </form>
+            </div>
+          )}
+          
+          {/* Question Side Panel - Always-on audio questions */}
+          {(detectedQuestions.length > 0 || audioStreamState?.isListening) && (
+            <div className="mt-4">
+              <QuestionSidePanel
+                questions={detectedQuestions}
+                audioStreamState={audioStreamState}
+                isCollapsed={isQuestionPanelCollapsed}
+                onToggleCollapse={() => setIsQuestionPanelCollapsed(!isQuestionPanelCollapsed)}
+                onAnswerQuestion={handleAnswerQuestion}
+                responseMode={responseMode}
+                className="w-full"
+              />
             </div>
           )}
         </div>

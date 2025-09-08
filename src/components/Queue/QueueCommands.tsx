@@ -10,8 +10,11 @@ import {
   Database,
   Bot,
   Image,
+  Headphones,
+  HeadphonesIcon,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogClose } from "../ui/dialog";
+import { DetectedQuestion, AudioStreamState } from "../../types/audio-stream";
 
 interface QnACollection {
   id: string;
@@ -33,6 +36,8 @@ interface QueueCommandsProps {
   responseMode?: ResponseMode;
   onResponseModeChange?: (mode: ResponseMode) => void;
   isAuthenticated?: boolean;
+  onQuestionDetected?: (question: DetectedQuestion) => void;
+  onAudioStreamStateChange?: (state: AudioStreamState) => void;
 }
 
 const QueueCommands: React.FC<QueueCommandsProps> = ({
@@ -42,6 +47,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   responseMode = { type: "plain" },
   onResponseModeChange,
   isAuthenticated = false,
+  onQuestionDetected,
+  onAudioStreamStateChange,
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -63,6 +70,14 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     left: 0,
     width: 0,
   });
+
+  // Audio Stream state
+  const [isListening, setIsListening] = useState(false);
+  const [audioStreamState, setAudioStreamState] = useState<AudioStreamState | null>(null);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
+  const [processor, setProcessor] = useState<ScriptProcessorNode | null>(null);
+  const audioChunks = useRef<Blob[]>([]);
 
   // Remove all chat-related state, handlers, and the Dialog overlay from this file.
 
@@ -114,6 +129,34 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       });
     }
   }, [isDropdownOpen]);
+
+  // Audio Stream event listeners setup
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const cleanupFunctions = [
+      window.electronAPI.onAudioQuestionDetected((question: DetectedQuestion) => {
+        console.log('[QueueCommands] Question detected:', question);
+        onQuestionDetected?.(question);
+      }),
+      
+      window.electronAPI.onAudioStreamStateChanged((state: AudioStreamState) => {
+        console.log('[QueueCommands] Audio stream state changed:', state);
+        setAudioStreamState(state);
+        onAudioStreamStateChange?.(state);
+      }),
+      
+      window.electronAPI.onAudioStreamError((error: string) => {
+        console.error('[QueueCommands] Audio stream error:', error);
+        setIsListening(false);
+        stopAudioCapture();
+      }),
+    ];
+
+    return () => {
+      cleanupFunctions.forEach((cleanup) => cleanup());
+    };
+  }, [isAuthenticated, onQuestionDetected, onAudioStreamStateChange]);
 
   // Keyboard shortcut listener for voice recording
   useEffect(() => {
@@ -167,6 +210,138 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     );
     console.log("[QueueCommands] Authentication status:", isAuthenticated);
     setIsDropdownOpen(!isDropdownOpen);
+  };
+
+  /**
+   * Start audio capture and streaming
+   */
+  const startAudioCapture = async (): Promise<void> => {
+    try {
+      console.log('[QueueCommands] Starting audio capture...');
+      
+      // Get user media with audio
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          sampleRate: 16000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+        } 
+      });
+      
+      // Create AudioContext for real-time processing
+      const ctx = new AudioContext({ sampleRate: 16000 });
+      const source = ctx.createMediaStreamSource(stream);
+      
+      // Create script processor for chunking
+      const scriptProcessor = ctx.createScriptProcessor(4096, 1, 1);
+      
+      scriptProcessor.onaudioprocess = async (event) => {
+        if (!isListening) return;
+        
+        const inputBuffer = event.inputBuffer;
+        const inputData = inputBuffer.getChannelData(0);
+        
+        // Convert Float32Array to Buffer for sending to main process
+        const buffer = new ArrayBuffer(inputData.length * 2);
+        const view = new Int16Array(buffer);
+        
+        // Convert float samples to 16-bit PCM
+        for (let i = 0; i < inputData.length; i++) {
+          view[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+        }
+        
+        // Send chunk to main process for processing
+        try {
+          await window.electronAPI.audioStreamProcessChunk(Buffer.from(buffer));
+        } catch (error) {
+          console.error('[QueueCommands] Error sending audio chunk:', error);
+        }
+      };
+      
+      source.connect(scriptProcessor);
+      scriptProcessor.connect(ctx.destination);
+      
+      setAudioContext(ctx);
+      setProcessor(scriptProcessor);
+      
+      console.log('[QueueCommands] Audio capture started successfully');
+      
+    } catch (error) {
+      console.error('[QueueCommands] Failed to start audio capture:', error);
+      throw error;
+    }
+  };
+
+  /**
+   * Stop audio capture
+   */
+  const stopAudioCapture = (): void => {
+    try {
+      if (processor) {
+        processor.disconnect();
+        setProcessor(null);
+      }
+      
+      if (audioContext) {
+        audioContext.close();
+        setAudioContext(null);
+      }
+      
+      console.log('[QueueCommands] Audio capture stopped');
+      
+    } catch (error) {
+      console.error('[QueueCommands] Error stopping audio capture:', error);
+    }
+  };
+
+  /**
+   * Toggle always-on listening
+   */
+  const handleListenToggle = async (): Promise<void> => {
+    if (!isAuthenticated) {
+      console.warn('[QueueCommands] User not authenticated for audio streaming');
+      return;
+    }
+
+    try {
+      if (isListening) {
+        // Stop listening
+        console.log('[QueueCommands] Stopping audio listening...');
+        
+        setIsListening(false);
+        stopAudioCapture();
+        
+        const result = await window.electronAPI.audioStreamStop();
+        if (!result.success) {
+          console.error('[QueueCommands] Failed to stop audio stream:', result.error);
+        }
+        
+      } else {
+        // Start listening
+        console.log('[QueueCommands] Starting audio listening...');
+        
+        setIsListening(true);
+        
+        // Start audio stream processor
+        const result = await window.electronAPI.audioStreamStart();
+        if (!result.success) {
+          console.error('[QueueCommands] Failed to start audio stream:', result.error);
+          setIsListening(false);
+          return;
+        }
+        
+        // Start local audio capture
+        await startAudioCapture();
+        
+        console.log('[QueueCommands] Audio listening started successfully');
+      }
+      
+    } catch (error) {
+      console.error('[QueueCommands] Error toggling listen state:', error);
+      setIsListening(false);
+      stopAudioCapture();
+    }
   };
 
   const handleMouseEnter = () => {
@@ -319,6 +494,34 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
             )}
           </button>
         </div>
+
+        {/* Always-On Listen Button */}
+        {isAuthenticated && (
+          <div className="flex items-center gap-2">
+            <button
+              className={`morphism-button px-2 py-1 text-[11px] leading-none flex items-center gap-1 ${
+                isListening 
+                  ? "!bg-emerald-600/70 hover:!bg-emerald-600/90 text-white" 
+                  : "text-white/70 hover:text-white"
+              }`}
+              onClick={handleListenToggle}
+              type="button"
+              title={isListening ? "常時リスニングを停止" : "常時リスニングを開始"}
+            >
+              {isListening ? (
+                <>
+                  <Headphones className="w-3 h-3 mr-1" />
+                  <span className="animate-pulse">リスニング中</span>
+                </>
+              ) : (
+                <>
+                  <HeadphonesIcon className="w-3 h-3 mr-1" />
+                  <span>リスニング</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
 
         {/* Chat Button */}
         <div className="flex items-center gap-2">

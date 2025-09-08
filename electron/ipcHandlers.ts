@@ -385,4 +385,102 @@ export function initializeIpcHandlers(appState: AppState): void {
   ipcMain.handle("center-and-show-window", async () => {
     appState.centerAndShowWindow()
   })
+
+  // Audio Stream Processing handlers
+  ipcMain.handle("audio-stream-start", async () => {
+    try {
+      await appState.audioStreamProcessor.startListening();
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error starting audio stream:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("audio-stream-stop", async () => {
+    try {
+      await appState.audioStreamProcessor.stopListening();
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error stopping audio stream:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("audio-stream-process-chunk", async (event, audioData: Buffer) => {
+    try {
+      await appState.audioStreamProcessor.processAudioChunk(audioData);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error processing audio chunk:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("audio-stream-get-state", async () => {
+    try {
+      return appState.audioStreamProcessor.getState();
+    } catch (error: any) {
+      console.error("Error getting audio stream state:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("audio-stream-get-questions", async () => {
+    try {
+      return appState.audioStreamProcessor.getQuestions();
+    } catch (error: any) {
+      console.error("Error getting detected questions:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("audio-stream-clear-questions", async () => {
+    try {
+      appState.audioStreamProcessor.clearQuestions();
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error clearing questions:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Handler for generating answers to detected questions using existing RAG system
+  ipcMain.handle("audio-stream-answer-question", async (event, questionText: string, collectionId?: string) => {
+    try {
+      // Check if user is authenticated and try usage tracking
+      const user = appState.authService.getCurrentUser();
+      const accessToken = appState.authService.getAccessToken();
+      
+      if (user && accessToken) {
+        // Check usage limits and increment if allowed
+        const usageCheck = await appState.usageTracker.checkCanAskQuestion(accessToken);
+        if (!usageCheck.allowed) {
+          const error = new Error(usageCheck.error || 'Usage limit exceeded');
+          (error as any).code = 'USAGE_LIMIT_EXCEEDED';
+          (error as any).remaining = usageCheck.remaining || 0;
+          throw error;
+        }
+
+        // Increment usage before processing
+        const usageResult = await appState.usageTracker.incrementQuestionUsage(accessToken);
+        if (!usageResult.success) {
+          console.warn('Usage tracking failed, but continuing with request:', usageResult.error);
+        }
+      }
+
+      // Use existing LLM helper with RAG if collection ID provided
+      let result;
+      if (collectionId && appState.processingHelper.getLLMHelper()) {
+        result = await appState.processingHelper.getLLMHelper().chatWithRAG(questionText, collectionId);
+      } else {
+        result = await appState.processingHelper.getLLMHelper().chatWithGemini(questionText);
+      }
+      
+      return { response: result.response || result, timestamp: Date.now() };
+    } catch (error: any) {
+      console.error("Error answering question:", error);
+      throw error;
+    }
+  });
 }
