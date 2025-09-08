@@ -4,6 +4,12 @@ import { ipcMain, app, shell } from "electron"
 import { AppState } from "./main"
 
 export function initializeIpcHandlers(appState: AppState): void {
+  // Debug logging handler to show frontend logs in terminal
+  ipcMain.handle("debug-log", async (event, message: string) => {
+    console.log('[Frontend Debug]', message);
+    return { success: true };
+  });
+
   ipcMain.handle(
     "update-content-dimensions",
     async (event, { width, height }: { width: number; height: number }) => {

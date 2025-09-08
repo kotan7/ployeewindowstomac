@@ -218,6 +218,15 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     try {
       console.log('[QueueCommands] Starting audio capture...');
       
+      // Check microphone permissions first
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log('[QueueCommands] Microphone permission granted');
+      } catch (permError) {
+        console.error('[QueueCommands] Microphone permission denied:', permError);
+        throw new Error('Microphone permission required for audio streaming');
+      }
+      
       // Get user media with audio
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
@@ -229,25 +238,45 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         } 
       });
       
+      console.log('[QueueCommands] Got media stream, creating AudioContext...');
+      
       // Create AudioContext for real-time processing
       const ctx = new AudioContext({ sampleRate: 16000 });
+      console.log('[QueueCommands] AudioContext created, state:', ctx.state);
+      
       const source = ctx.createMediaStreamSource(stream);
+      console.log('[QueueCommands] Media stream source created');
       
       // Create script processor for chunking
       const scriptProcessor = ctx.createScriptProcessor(4096, 1, 1);
+      console.log('[QueueCommands] Script processor created');
       
+      let chunkCount = 0;
       scriptProcessor.onaudioprocess = async (event) => {
-        if (!isListening) return;
+        chunkCount++;
+        console.log(`[QueueCommands] Audio process event ${chunkCount}, isListening:`, isListening);
+        
+        if (!isListening) {
+          console.log('[QueueCommands] Not listening, dropping audio chunk');
+          return;
+        }
         
         const inputBuffer = event.inputBuffer;
         const inputData = inputBuffer.getChannelData(0);
         
+        // Check for actual audio data
+        const hasAudio = inputData.some(sample => Math.abs(sample) > 0.001);
+        console.log('[QueueCommands] Audio chunk - samples:', inputData.length, 'hasAudio:', hasAudio);
+        
         // Send Float32Array directly as expected by the preload API
         try {
-          console.log('[QueueCommands] Sending audio chunk, samples:', inputData.length);
+          console.log('[QueueCommands] Sending audio chunk to main process...');
           await window.electronAPI.audioStreamProcessChunk(inputData);
+          console.log('[QueueCommands] Audio chunk sent successfully');
         } catch (error) {
           console.error('[QueueCommands] Error sending audio chunk:', error);
+          // Also log to main process
+          window.electronAPI.invoke('debug-log', '[QueueCommands] Error sending audio chunk: ' + error);
           setIsListening(false);
           stopAudioCapture();
         }
@@ -259,10 +288,14 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       setAudioContext(ctx);
       setProcessor(scriptProcessor);
       
-      console.log('[QueueCommands] Audio capture setup completed');
+      console.log('[QueueCommands] Audio capture setup completed successfully');
+      // Also log to main process for terminal visibility
+      window.electronAPI.invoke('debug-log', '[QueueCommands] Audio capture setup completed successfully');
       
     } catch (error) {
       console.error('[QueueCommands] Failed to start audio capture:', error);
+      // Also log to main process
+      window.electronAPI.invoke('debug-log', '[QueueCommands] Failed to start audio capture: ' + error);
       setIsListening(false);
       stopAudioCapture();
       throw error;
@@ -304,6 +337,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       if (isListening) {
         // Stop listening
         console.log('[QueueCommands] Stopping audio listening...');
+        window.electronAPI.invoke('debug-log', '[QueueCommands] Stopping audio listening...');
         
         setIsListening(false);
         stopAudioCapture();
@@ -316,9 +350,14 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       } else {
         // Start listening
         console.log('[QueueCommands] Starting audio listening...');
+        window.electronAPI.invoke('debug-log', '[QueueCommands] Starting audio listening...');
         
         try {
-          // Step 1: Start local audio capture FIRST
+          // CRITICAL FIX: Set listening state FIRST so audio chunks won't be dropped
+          setIsListening(true);
+          console.log('[QueueCommands] Set isListening to true');
+          
+          // Step 1: Start local audio capture
           await startAudioCapture();
           console.log('[QueueCommands] Audio capture initialized');
           
@@ -331,12 +370,12 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
             return;
           }
           
-          // Step 3: Set listening state only after both are successful
-          setIsListening(true);
           console.log('[QueueCommands] Audio listening started successfully');
+          window.electronAPI.invoke('debug-log', '[QueueCommands] Audio listening started successfully');
           
         } catch (error) {
           console.error('[QueueCommands] Failed to start audio listening:', error);
+          window.electronAPI.invoke('debug-log', '[QueueCommands] Failed to start audio listening: ' + error);
           setIsListening(false);
           stopAudioCapture();
           throw error;
@@ -345,6 +384,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
       
     } catch (error) {
       console.error('[QueueCommands] Error toggling listen state:', error);
+      window.electronAPI.invoke('debug-log', '[QueueCommands] Error toggling listen state: ' + error);
       setIsListening(false);
       stopAudioCapture();
     }
