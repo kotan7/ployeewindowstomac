@@ -295,7 +295,7 @@ export class AudioStreamProcessor extends EventEmitter {
       
       console.log('[AudioStreamProcessor] Created PCM buffer, size:', pcmBuffer.length);
       const tempFilePath = await this.createTempAudioFile(pcmBuffer);
-      console.log('[AudioStreamProcessor] Created temp file:', tempFilePath);
+      console.log('[AudioStreamProcessor] Created WAV file:', tempFilePath, 'with proper headers');
       
       const transcription = await this.openai.audio.transcriptions.create({
         file: fs.createReadStream(tempFilePath),
@@ -493,9 +493,46 @@ ${questionTexts.join('\n')}
   }
 
   private async createTempAudioFile(buffer: Buffer): Promise<string> {
-    // Create a temporary audio file for Whisper API
+    // Create a proper WAV file with headers for Whisper API
     const tempPath = path.join(os.tmpdir(), `audio_${Date.now()}.wav`);
-    await fs.promises.writeFile(tempPath, buffer);
+    
+    // WAV file parameters
+    const sampleRate = this.config.sampleRate; // 16000 Hz
+    const channels = 1; // Mono
+    const bitsPerSample = 16; // 16-bit
+    const bytesPerSample = bitsPerSample / 8; // 2 bytes
+    const blockAlign = channels * bytesPerSample; // 2
+    const byteRate = sampleRate * blockAlign; // 32000
+    const dataSize = buffer.length;
+    const fileSize = 36 + dataSize; // Header size (44) - 8 + data size
+    
+    // Create WAV header (44 bytes total)
+    const header = Buffer.alloc(44);
+    let offset = 0;
+    
+    // RIFF Header (12 bytes)
+    header.write('RIFF', offset); offset += 4;
+    header.writeUInt32LE(fileSize, offset); offset += 4;
+    header.write('WAVE', offset); offset += 4;
+    
+    // Format Chunk (24 bytes)
+    header.write('fmt ', offset); offset += 4;
+    header.writeUInt32LE(16, offset); offset += 4; // Format chunk size
+    header.writeUInt16LE(1, offset); offset += 2; // Audio format (1 = PCM)
+    header.writeUInt16LE(channels, offset); offset += 2; // Number of channels
+    header.writeUInt32LE(sampleRate, offset); offset += 4; // Sample rate
+    header.writeUInt32LE(byteRate, offset); offset += 4; // Byte rate
+    header.writeUInt16LE(blockAlign, offset); offset += 2; // Block align
+    header.writeUInt16LE(bitsPerSample, offset); offset += 2; // Bits per sample
+    
+    // Data Chunk Header (8 bytes)
+    header.write('data', offset); offset += 4;
+    header.writeUInt32LE(dataSize, offset); // Data size
+    
+    // Combine header and PCM data
+    const wavFile = Buffer.concat([header, buffer]);
+    
+    await fs.promises.writeFile(tempPath, wavFile);
     return tempPath;
   }
 
