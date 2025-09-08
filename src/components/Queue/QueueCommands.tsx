@@ -276,7 +276,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         
         let chunkCount = 0;
         workletNode.port.onmessage = async (event) => {
-          const { type, data: inputData, message, hasAudio, length } = event.data;
+          const { type, data: inputData, message, length, durationMs, triggerReason } = event.data;
           
           if (type === 'log') {
             console.log('[QueueCommands] AudioWorklet log:', message);
@@ -284,28 +284,26 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
             return;
           }
           
-          if (type === 'audio-data') {
+          if (type === 'audio-chunk') {
             chunkCount++;
-            console.log(`[QueueCommands] Audio worklet event ${chunkCount}, isListening:`, isListening, 'hasAudio:', hasAudio, 'length:', length);
-            window.electronAPI.invoke('debug-log', `[QueueCommands] AudioWorklet chunk ${chunkCount}, isListening: ${isListening}, hasAudio: ${hasAudio}`);
+            console.log(`[QueueCommands] Received audio chunk ${chunkCount}, isListening:`, isListening, 'length:', length, 'duration:', durationMs + 'ms', 'trigger:', triggerReason);
+            window.electronAPI.invoke('debug-log', `[QueueCommands] Audio chunk ${chunkCount}, duration: ${durationMs}ms, trigger: ${triggerReason}`);
             
             if (!isListening) {
               console.log('[QueueCommands] Not listening, dropping audio chunk');
               return;
             }
             
-            if (hasAudio) {
-              // Send Float32Array directly as expected by the preload API
-              try {
-                console.log('[QueueCommands] Sending audio chunk to main process...');
-                await window.electronAPI.audioStreamProcessChunk(inputData);
-                console.log('[QueueCommands] Audio chunk sent successfully');
-              } catch (error) {
-                console.error('[QueueCommands] Error sending audio chunk:', error);
-                window.electronAPI.invoke('debug-log', '[QueueCommands] Error sending audio chunk: ' + error);
-                setIsListening(false);
-                stopAudioCapture();
-              }
+            // Send the complete audio chunk to the backend for transcription
+            try {
+              console.log('[QueueCommands] Sending audio chunk to main process for transcription...');
+              await window.electronAPI.audioStreamProcessChunk(inputData);
+              console.log('[QueueCommands] Audio chunk sent successfully');
+            } catch (error) {
+              console.error('[QueueCommands] Error sending audio chunk:', error);
+              window.electronAPI.invoke('debug-log', '[QueueCommands] Error sending audio chunk: ' + error);
+              setIsListening(false);
+              stopAudioCapture();
             }
           }
         };
@@ -322,76 +320,10 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         console.log('[QueueCommands] AudioWorklet setup completed');
         window.electronAPI.invoke('debug-log', '[QueueCommands] AudioWorklet setup completed');
         
-        // Test worklet immediately
+        // Test worklet and show status after 1 second
         setTimeout(() => {
-          console.log('[QueueCommands] Testing AudioWorklet after 1 second...');
-          window.electronAPI.invoke('debug-log', '[QueueCommands] Testing AudioWorklet after 1 second...');
-          
-          // Check if we're getting any audio processing events
-          if (chunkCount === 0) {
-            console.warn('[QueueCommands] AudioWorklet not receiving audio after 1 second, will try ScriptProcessor fallback in 1 more second');
-            window.electronAPI.invoke('debug-log', '[QueueCommands] AudioWorklet not receiving audio, will try fallback');
-            
-            setTimeout(() => {
-              if (chunkCount === 0 && isListening) {
-                console.log('[QueueCommands] Forcing fallback to ScriptProcessor due to no AudioWorklet activity');
-                window.electronAPI.invoke('debug-log', '[QueueCommands] Forcing ScriptProcessor fallback');
-                
-                // Manually trigger fallback
-                try {
-                  // Disconnect AudioWorklet
-                  if (processor) {
-                    processor.disconnect();
-                  }
-                  
-                  // Create ScriptProcessor fallback
-                  const scriptProcessor = ctx.createScriptProcessor(4096, 1, 1);
-                  console.log('[QueueCommands] Manual ScriptProcessor fallback created');
-                  window.electronAPI.invoke('debug-log', '[QueueCommands] Manual ScriptProcessor fallback created');
-                  
-                  let scriptChunkCount = 0;
-                  scriptProcessor.onaudioprocess = async (event) => {
-                    scriptChunkCount++;
-                    console.log(`[QueueCommands] ScriptProcessor fallback event ${scriptChunkCount}, isListening:`, isListening);
-                    window.electronAPI.invoke('debug-log', `[QueueCommands] ScriptProcessor fallback event ${scriptChunkCount}`);
-                    
-                    if (!isListening) {
-                      console.log('[QueueCommands] Not listening, dropping audio chunk');
-                      return;
-                    }
-                    
-                    const inputBuffer = event.inputBuffer;
-                    const inputData = inputBuffer.getChannelData(0);
-                    
-                    // Check for actual audio data
-                    const hasAudio = inputData.some((sample: number) => Math.abs(sample) > 0.001);
-                    console.log('[QueueCommands] ScriptProcessor audio chunk - samples:', inputData.length, 'hasAudio:', hasAudio);
-                    
-                    if (hasAudio) {
-                      try {
-                        console.log('[QueueCommands] Sending ScriptProcessor audio chunk to main process...');
-                        await window.electronAPI.audioStreamProcessChunk(inputData);
-                        console.log('[QueueCommands] ScriptProcessor audio chunk sent successfully');
-                      } catch (error) {
-                        console.error('[QueueCommands] ScriptProcessor error sending audio chunk:', error);
-                        window.electronAPI.invoke('debug-log', '[QueueCommands] ScriptProcessor error: ' + error);
-                        setIsListening(false);
-                        stopAudioCapture();
-                      }
-                    }
-                  };
-                  
-                  source.connect(scriptProcessor);
-                  scriptProcessor.connect(ctx.destination);
-                  setProcessor(scriptProcessor);
-                  
-                } catch (fallbackError) {
-                  console.error('[QueueCommands] Manual fallback failed:', fallbackError);
-                  window.electronAPI.invoke('debug-log', '[QueueCommands] Manual fallback failed: ' + fallbackError);
-                }
-              }
-            }, 2000);
-          }
+          console.log('[QueueCommands] AudioWorklet status check after 1 second');
+          window.electronAPI.invoke('debug-log', '[QueueCommands] AudioWorklet status check after 1 second');
         }, 1000);
         
       } catch (workletError) {
@@ -448,61 +380,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           window.electronAPI.invoke('debug-log', '[QueueCommands] Testing ScriptProcessor after 1 second...');
         }, 1000);
       }
-      
-      // If we still don't have audio processing after 2 seconds, try AnalyserNode polling fallback
-      setTimeout(() => {
-        if (isListening && !audioAnalyser) {
-          console.log('[QueueCommands] Setting up AnalyserNode polling fallback...');
-          window.electronAPI.invoke('debug-log', '[QueueCommands] Setting up AnalyserNode polling fallback...');
-          
-          try {
-            const analyser = ctx.createAnalyser();
-            analyser.fftSize = 2048;
-            const bufferLength = analyser.frequencyBinCount;
-            const dataArray = new Float32Array(bufferLength);
-            
-            source.connect(analyser);
-            setAudioAnalyser(analyser);
-            
-            // Poll for audio data every 100ms
-            const interval = setInterval(async () => {
-              if (!isListening) {
-                clearInterval(interval);
-                return;
-              }
-              
-              analyser.getFloatTimeDomainData(dataArray);
-              
-              // Check for actual audio data
-              const hasAudio = dataArray.some((sample: number) => Math.abs(sample) > 0.001);
-              
-              if (hasAudio) {
-                console.log('[QueueCommands] AnalyserNode detected audio, samples:', dataArray.length);
-                window.electronAPI.invoke('debug-log', '[QueueCommands] AnalyserNode detected audio, samples: ' + dataArray.length);
-                
-                try {
-                  await window.electronAPI.audioStreamProcessChunk(dataArray);
-                  console.log('[QueueCommands] AnalyserNode audio chunk sent successfully');
-                } catch (error) {
-                  console.error('[QueueCommands] AnalyserNode error sending audio chunk:', error);
-                  window.electronAPI.invoke('debug-log', '[QueueCommands] AnalyserNode error: ' + error);
-                  clearInterval(interval);
-                  setIsListening(false);
-                  stopAudioCapture();
-                }
-              }
-            }, 100); // Poll every 100ms
-            
-            setPollingInterval(interval);
-            console.log('[QueueCommands] AnalyserNode polling started');
-            window.electronAPI.invoke('debug-log', '[QueueCommands] AnalyserNode polling started');
-            
-          } catch (analyserError) {
-            console.error('[QueueCommands] Failed to setup AnalyserNode:', analyserError);
-            window.electronAPI.invoke('debug-log', '[QueueCommands] Failed to setup AnalyserNode: ' + analyserError);
-          }
-        }
-      }, 2000);
       
       console.log('[QueueCommands] Audio capture setup completed successfully');
       // Also log to main process for terminal visibility
