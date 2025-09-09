@@ -624,6 +624,21 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
   // Remove handleChatSend function
 
+  // Cleanup on unmount or when listening state changes
+  useEffect(() => {
+    return () => {
+      if (isListening) {
+        try {
+          // Stop backend processor first
+          window.electronAPI.audioStreamStop().catch(() => {});
+        } finally {
+          // Always stop local capture
+          stopAudioCapture();
+        }
+      }
+    };
+  }, [isListening]);
+
   return (
     <div className="w-fit overflow-visible">
       <div className="text-xs text-white/90 liquid-glass-bar py-2 px-3 flex items-center justify-center gap-3 draggable-area overflow-visible">

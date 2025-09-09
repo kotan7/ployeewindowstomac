@@ -319,11 +319,26 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
     setAudioStreamState(state);
   };
 
-  const handleAnswerQuestion = async (question: DetectedQuestion, collectionId?: string): Promise<void> => {
+  const answersCacheRef = useRef<Map<string, { response: string; timestamp: number }>>(new Map());
+
+  const handleAnswerQuestion = async (question: DetectedQuestion, collectionId?: string): Promise<{ response: string; timestamp: number }> => {
     try {
       console.log('[Queue] Answering question:', question.text, 'with collection:', collectionId);
       
-      const result = await window.electronAPI.audioStreamAnswerQuestion(
+      // Memoization: return cached response if present
+      const cached = answersCacheRef.current.get(question.id);
+      if (cached) {
+        console.log('[Queue] Returning cached answer');
+        // Also surface in chat to keep UX consistent
+        setChatMessages(prev => [
+          ...prev,
+          { role: "user", text: question.text },
+          { role: "gemini", text: cached.response }
+        ]);
+        return cached;
+      }
+
+      const result = await (window.electronAPI as any).audioStreamAnswerQuestion(
         question.text, 
         collectionId
       );
@@ -336,6 +351,10 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
         { role: "user", text: question.text },
         { role: "gemini", text: result.response }
       ]);
+
+      // Cache the result
+      answersCacheRef.current.set(question.id, result);
+      return result;
       
     } catch (error: any) {
       console.error('[Queue] Failed to answer question:', error);
@@ -354,6 +373,7 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
           { role: "gemini", text: "エラー: " + error.message }
         ]);
       }
+      throw error;
     }
   };
 

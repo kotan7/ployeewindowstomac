@@ -51,6 +51,15 @@ declare global {
         collectionId?: string
       ) => Promise<{ text: string; timestamp: number }>;
 
+      // Audio Stream methods
+      audioStreamStart: () => Promise<{ success: boolean; error?: string }>;
+      audioStreamStop: () => Promise<{ success: boolean; error?: string }>;
+      audioStreamProcessChunk: (audioData: Float32Array) => Promise<{ success: boolean; error?: string }>;
+      audioStreamGetState: () => Promise<{ isListening: boolean; error?: string }>;
+      audioStreamGetQuestions: () => Promise<Array<{ text: string; timestamp: number }>>;
+      audioStreamClearQuestions: () => Promise<{ success: boolean; error?: string }>;
+      audioStreamAnswerQuestion: (questionText: string, collectionId?: string) => Promise<{ response: string; timestamp: number }>;
+
       moveWindowLeft: () => Promise<void>;
       moveWindowRight: () => Promise<void>;
       moveWindowUp: () => Promise<void>;
@@ -59,6 +68,12 @@ declare global {
       invoke: (channel: string, ...args: any[]) => Promise<any>;
       onVoiceRecordingTrigger: (callback: () => void) => () => void;
       onChatToggle: (callback: () => void) => () => void;
+
+      // Audio Stream event listeners
+      onAudioQuestionDetected: (callback: (question: any) => void) => () => void;
+      onAudioBatchProcessed: (callback: (questions: any[]) => void) => () => void;
+      onAudioStreamStateChanged: (callback: (state: any) => void) => () => void;
+      onAudioStreamError: (callback: (error: string) => void) => () => void;
 
       // Auth methods
       authSignIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;

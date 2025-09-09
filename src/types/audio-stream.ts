@@ -33,6 +33,9 @@ export interface DetectedQuestion {
   text: string;
   timestamp: number;
   confidence: number;
+  // Optional fields populated during refinement and used by renderer UI
+  isRefined?: boolean;
+  refinedText?: string;
 }
 
 export interface QuestionBatch {

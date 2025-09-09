@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ChevronDown, ChevronUp, MessageSquare, Clock, Sparkles, ExternalLink } from 'lucide-react';
 import { DetectedQuestion, AudioStreamState } from '../../types/audio-stream';
 
@@ -7,7 +7,7 @@ interface QuestionSidePanelProps {
   audioStreamState: AudioStreamState | null;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
-  onAnswerQuestion: (question: DetectedQuestion, collectionId?: string) => Promise<void>;
+  onAnswerQuestion: (question: DetectedQuestion, collectionId?: string) => Promise<{ response: string; timestamp: number }>;
   responseMode?: {
     type: "plain" | "qna";
     collectionId?: string;
@@ -54,8 +54,9 @@ const QuestionItem: React.FC<QuestionItemProps> = ({
     });
   };
 
-  const displayText = question.isRefined && question.refinedText 
-    ? question.refinedText 
+  const refined = (question as any).refinedText as string | undefined;
+  const displayText = refined && refined.trim().length > 0 
+    ? refined 
     : question.text;
 
   return (
@@ -72,8 +73,8 @@ const QuestionItem: React.FC<QuestionItemProps> = ({
               <Clock className="w-3 h-3" />
               {formatTimestamp(question.timestamp)}
             </span>
-            {question.isRefined && (
-              <Sparkles className="w-3 h-3 text-emerald-400" title="AI refined" />
+            {refined && (
+              <Sparkles className="w-3 h-3 text-emerald-400" />
             )}
           </div>
           <p className="text-xs text-white/90 leading-relaxed">
@@ -125,12 +126,28 @@ const QuestionSidePanel: React.FC<QuestionSidePanelProps> = ({
   const [answers, setAnswers] = useState<Map<string, string>>(new Map());
   const panelRef = useRef<HTMLDivElement>(null);
 
+  // Deduplicate questions by normalized refinedText || text
+  const uniqueQuestions = useMemo(() => {
+    const seen = new Set<string>();
+    const result: DetectedQuestion[] = [];
+    for (const q of questions) {
+      const refined: string | undefined = (q as any).refinedText;
+      const base = (refined && refined.trim().length > 0 ? refined : q.text).trim();
+      const norm = base.toLowerCase().replace(/\s+/g, ' ');
+      if (!seen.has(norm)) {
+        seen.add(norm);
+        result.push(q);
+      }
+    }
+    return result;
+  }, [questions]);
+
   // Auto-expand when first question is detected
   useEffect(() => {
-    if (questions.length > 0 && isCollapsed) {
+    if (uniqueQuestions.length > 0 && isCollapsed) {
       onToggleCollapse();
     }
-  }, [questions.length, isCollapsed, onToggleCollapse]);
+  }, [uniqueQuestions.length, isCollapsed, onToggleCollapse]);
 
   const handleAnswerQuestion = async (question: DetectedQuestion) => {
     if (generatingAnswers.has(question.id)) return;
@@ -139,7 +156,12 @@ const QuestionSidePanel: React.FC<QuestionSidePanelProps> = ({
 
     try {
       const collectionId = responseMode.type === "qna" ? responseMode.collectionId : undefined;
-      await onAnswerQuestion(question, collectionId);
+      const result = await onAnswerQuestion(question, collectionId);
+      setAnswers(prev => {
+        const next = new Map(prev);
+        next.set(question.id, result.response);
+        return next;
+      });
       
       // Note: Answer will be set by the parent component after successful response
       // This component receives answers via props or callbacks
@@ -171,9 +193,9 @@ const QuestionSidePanel: React.FC<QuestionSidePanelProps> = ({
           <span className="text-sm font-medium text-white/90">
             検出された質問
           </span>
-          {questions.length > 0 && (
+          {uniqueQuestions.length > 0 && (
             <span className="bg-blue-500/20 text-blue-300 text-xs px-2 py-0.5 rounded-full">
-              {questions.length}
+              {uniqueQuestions.length}
             </span>
           )}
         </div>
@@ -201,7 +223,7 @@ const QuestionSidePanel: React.FC<QuestionSidePanelProps> = ({
       {/* Panel Content */}
       {!isCollapsed && (
         <div className="mt-2">
-          {questions.length === 0 ? (
+          {uniqueQuestions.length === 0 ? (
             <div className="liquid-glass chat-container p-4 text-center">
               <MessageSquare className="w-8 h-8 text-white/30 mx-auto mb-2" />
               <p className="text-xs text-white/50">
@@ -212,7 +234,7 @@ const QuestionSidePanel: React.FC<QuestionSidePanelProps> = ({
             </div>
           ) : (
             <div className="space-y-2 max-h-64 overflow-y-auto">
-              {questions
+              {uniqueQuestions
                 .slice()
                 .reverse() // Show newest questions first
                 .map((question) => (

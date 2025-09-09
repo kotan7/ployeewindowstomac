@@ -359,6 +359,14 @@ export class AudioStreamProcessor extends EventEmitter {
         this.emit('state-changed', { ...this.state });
         
         console.log('[AudioStreamProcessor] Question detected:', detectedQuestion.text);
+
+        // Hybrid batching: if pending reaches maxBatchSize and not processing, trigger immediately
+        const pendingCount = this.state.batchProcessor.pendingQuestions.length;
+        if (!this.state.batchProcessor.isProcessing && pendingCount >= this.config.maxBatchSize) {
+          console.log('[AudioStreamProcessor] Pending reached maxBatchSize, triggering immediate batch');
+          await this.processBatch();
+          // processBatch will update lastBatchTime, effectively resetting the timer
+        }
       }
       
     } catch (error) {
@@ -377,7 +385,8 @@ export class AudioStreamProcessor extends EventEmitter {
       const timeSinceLastBatch = now - this.lastBatchTime;
       
       if (timeSinceLastBatch >= this.config.batchInterval && 
-          this.state.batchProcessor.pendingQuestions.length > 0) {
+          this.state.batchProcessor.pendingQuestions.length > 0 &&
+          !this.state.batchProcessor.isProcessing) {
         await this.processBatch();
       }
     }, 5000); // Check every 5 seconds
@@ -396,8 +405,9 @@ export class AudioStreamProcessor extends EventEmitter {
       this.state.batchProcessor.isProcessing = true;
       this.lastBatchTime = Date.now();
       
-      const questionsToProcess = [...this.state.batchProcessor.pendingQuestions];
-      this.state.batchProcessor.pendingQuestions = [];
+      // Take up to maxBatchSize for this run, leave remainder pending
+      const toTake = Math.min(this.config.maxBatchSize, this.state.batchProcessor.pendingQuestions.length);
+      const questionsToProcess = this.state.batchProcessor.pendingQuestions.splice(0, toTake);
       
       console.log(`[AudioStreamProcessor] Processing batch of ${questionsToProcess.length} questions`);
 
@@ -409,7 +419,8 @@ export class AudioStreamProcessor extends EventEmitter {
         refinedQuestions.forEach(refined => {
           const original = this.state.questionBuffer.find(q => q.id === refined.id);
           if (original) {
-            original.text = refined.text;
+            // Preserve original but store refined text separately
+            (original as any).refinedText = (refined as any).refinedText || refined.text;
           }
         });
         
