@@ -11,7 +11,8 @@ export class QuestionDetector {
   constructor() {}
 
   /**
-   * Analyzes transcribed text to detect if it contains a question
+   * Analyzes transcribed text to detect if it contains questions
+   * Can return multiple questions if the text contains multiple question patterns
    */
   public detectQuestion(transcription: TranscriptionResult): DetectedQuestion | null {
     const text = transcription.text.trim();
@@ -27,15 +28,53 @@ export class QuestionDetector {
     const hasEnglishQuestion = this.englishQuestionPattern.test(text);
     
     if (hasJapaneseQuestion || hasEnglishQuestion) {
+      // Split on common delimiters that separate multiple questions
+      const questions = this.splitMultipleQuestions(text);
+      
+      if (questions.length > 1) {
+        console.log(`[QuestionDetector] Detected multiple questions in one transcription: ${questions.join(' | ')}`);
+      }
+      
+      // For now, return the combined text as one question
+      // The refinement process will handle splitting and cleaning them up
       return {
         id: uuidv4(),
         text: text,
-          timestamp: transcription.timestamp,
-          confidence: transcription.confidence
+        timestamp: transcription.timestamp,
+        confidence: transcription.confidence
       };
     }
 
     return null;
+  }
+
+  /**
+   * Helper method to identify if text contains multiple questions
+   */
+  private splitMultipleQuestions(text: string): string[] {
+    // Common delimiters for multiple questions in Japanese
+    const delimiters = [
+      '。', // Japanese period
+      '？', // Japanese question mark
+      '?',  // English question mark  
+      'それから', // "and then"
+      'あと', // "after that"
+      'つぎに', // "next"
+      '次に', // "next"
+    ];
+    
+    // Simple split on common delimiters
+    let parts = [text];
+    for (const delimiter of delimiters) {
+      const newParts: string[] = [];
+      for (const part of parts) {
+        newParts.push(...part.split(delimiter).map(p => p.trim()).filter(p => p.length > 0));
+      }
+      parts = newParts;
+    }
+    
+    // Filter out parts that are too short to be meaningful questions
+    return parts.filter(part => part.length >= 5);
   }
 
   /**

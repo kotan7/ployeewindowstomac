@@ -421,6 +421,10 @@ export class AppState {
       mainWindow.webContents.send('audio-batch-processed', questions);
     });
 
+    this.audioStreamProcessor.on('transcription-completed', (result) => {
+      mainWindow.webContents.send('audio-transcription-completed', result);
+    });
+
     this.audioStreamProcessor.on('state-changed', (state) => {
       mainWindow.webContents.send('audio-stream-state-changed', state);
     });

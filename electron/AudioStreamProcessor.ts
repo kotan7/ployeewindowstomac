@@ -53,8 +53,8 @@ export class AudioStreamProcessor extends EventEmitter {
       silenceThreshold: 800, // 800ms silence threshold from memory
       maxWords: 40, // 40 words max per chunk from memory
       questionDetectionEnabled: true,
-      batchInterval: 30000, // 30 seconds batch processing
-      maxBatchSize: 5,
+      batchInterval: 10000, // 30 seconds batch processing
+      maxBatchSize: 3,
       ...config
     };
 
@@ -439,29 +439,77 @@ export class AudioStreamProcessor extends EventEmitter {
   /**
    * Use Gemini to refine and improve question quality
    */
+  /**
+ * Simplified method to refine questions using Gemini
+ * Replace the existing refineQuestionsWithGemini method with this one
+ */
   private async refineQuestionsWithGemini(questions: DetectedQuestion[]): Promise<DetectedQuestion[]> {
     if (!this.llmHelper || questions.length === 0) return questions;
-
+  
     try {
       // Preprocess questions (deduplication, filtering)
       const preprocessed = this.questionDetector.preprocessQuestions(questions);
       
-      const questionTexts = preprocessed.map(q => q.text);
-      const prompt = `以下の音声から抽出された文章から質問を抽出し、簡潔で分かりやすい日本語の質問文に書き直してください。
-
-音声テキスト:
-${questionTexts.join('\n')}
-
-各質問を一行ずつ、改善された形で返してください。質問でない文章は除外してください。`;
-
-      const result = await this.llmHelper.chatWithGemini(prompt);
+      console.log(`[AudioStreamProcessor] Refining ${preprocessed.length} questions individually`);
       
-      // Parse the refined questions
-      const refinedTexts = result.split('\n').filter(line => line.trim().length > 0);
+      const refinedQuestions: DetectedQuestion[] = [];
       
-      return preprocessed.map((question, index) => ({...question,
-        refinedText: refinedTexts[index] || question.text
-      }));
+      // Process each question individually to prevent merging
+      for (let i = 0; i < preprocessed.length; i++) {
+        const question = preprocessed[i];
+        
+        try {
+          const prompt = `以下の音声認識で検出された質問文を、意味を変えずに自然で読みやすい日本語に修正してください。
+  音声認識の誤りや不自然な表現のみを修正し、質問の内容や意味は絶対に変更しないでください。
+  
+  質問: ${question.text}
+  
+  修正された質問のみを1行で返してください。余計な説明は不要です。`;
+  
+          console.log(`[AudioStreamProcessor] Processing question ${i + 1}:`, question.text);
+          
+          const result = await this.llmHelper.chatWithGemini(prompt);
+          console.log(`[AudioStreamProcessor] Gemini result for question ${i + 1}:`, result);
+          
+          // Clean up the result
+          const refinedText = result
+            .split('\n')[0] // Take only first line
+            .trim()
+            .replace(/^修正版[：:]\s*/, '') // Remove "修正版:" prefix
+            .replace(/^修正された質問[：:]\s*/, '') // Remove "修正された質問:" prefix
+            .replace(/^[\d]+[.)：:]\s*/, '') // Remove numbering
+            .replace(/^[-•*]\s*/, '') // Remove bullets
+            .trim();
+          
+          refinedQuestions.push({
+            ...question,
+            refinedText: refinedText.length > 0 ? refinedText : question.text
+          });
+          
+          console.log(`[AudioStreamProcessor] Refined question ${i + 1}:`, {
+            original: question.text,
+            refined: refinedText
+          });
+          
+        } catch (error) {
+          console.error(`[AudioStreamProcessor] Error refining question ${i + 1}:`, error);
+          // Fall back to original text if refinement fails
+          refinedQuestions.push({
+            ...question,
+            refinedText: question.text
+          });
+        }
+      }
+      
+      console.log('[AudioStreamProcessor] All questions refined:', 
+        refinedQuestions.map((q, i) => ({
+          index: i,
+          original: q.text,
+          refined: (q as any).refinedText
+        }))
+      );
+      
+      return refinedQuestions;
       
     } catch (error) {
       console.error('[AudioStreamProcessor] Gemini refinement error:', error);
@@ -469,7 +517,7 @@ ${questionTexts.join('\n')}
       return questions;
     }
   }
-
+  
   /**
    * Get current state
    */

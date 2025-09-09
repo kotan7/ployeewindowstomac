@@ -59,7 +59,6 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
   // Audio stream state
   const [detectedQuestions, setDetectedQuestions] = useState<DetectedQuestion[]>([]);
   const [audioStreamState, setAudioStreamState] = useState<AudioStreamState | null>(null);
-  const [isQuestionPanelCollapsed, setIsQuestionPanelCollapsed] = useState(true);
 
   const barRef = useRef<HTMLDivElement>(null);
 
@@ -314,6 +313,22 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
     setDetectedQuestions(prev => [...prev, question]);
   };
 
+  const handleAudioBatchProcessed = (refinedQuestions: DetectedQuestion[]) => {
+    console.log('[Queue] Batch processed, refined questions:', refinedQuestions);
+    // Update existing questions with refined text
+    setDetectedQuestions(prev => {
+      const updated = [...prev];
+      refinedQuestions.forEach(refined => {
+        const existing = updated.find(q => q.id === refined.id);
+        if (existing) {
+          // Update the existing question with refined text
+          (existing as any).refinedText = (refined as any).refinedText || refined.text;
+        }
+      });
+      return updated;
+    });
+  };
+
   const handleAudioStreamStateChange = (state: AudioStreamState) => {
     console.log('[Queue] Audio stream state changed:', state);
     setAudioStreamState(state);
@@ -476,6 +491,7 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
                 onResponseModeChange={handleResponseModeChange}
                 isAuthenticated={true} // User is always authenticated when Queue is rendered
                 onQuestionDetected={handleQuestionDetected}
+                onAudioBatchProcessed={handleAudioBatchProcessed}
                 onAudioStreamStateChange={handleAudioStreamStateChange}
               />
             </div>
@@ -678,14 +694,12 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
             </div>
           )}
           
-          {/* Question Side Panel - Always-on audio questions */}
+          {/* Question Panel - Two-panel layout for refined questions */}
           {(detectedQuestions.length > 0 || audioStreamState?.isListening) && (
             <div className="mt-4">
               <QuestionSidePanel
                 questions={detectedQuestions}
                 audioStreamState={audioStreamState}
-                isCollapsed={isQuestionPanelCollapsed}
-                onToggleCollapse={() => setIsQuestionPanelCollapsed(!isQuestionPanelCollapsed)}
                 onAnswerQuestion={handleAnswerQuestion}
                 responseMode={responseMode}
                 className="w-full"
