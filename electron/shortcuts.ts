@@ -96,14 +96,6 @@ export class ShortcutsHelper {
       }
     })
 
-    // Voice recording shortcut
-    globalShortcut.register("CommandOrControl+V", () => {
-      console.log("Command/Ctrl + V pressed. Triggering voice recording...")
-      const mainWindow = this.appState.getMainWindow()
-      if (mainWindow) {
-        mainWindow.webContents.send("trigger-voice-recording")
-      }
-    })
 
     // Chat toggle shortcut  
     globalShortcut.register("CommandOrControl+T", () => {

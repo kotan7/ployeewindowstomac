@@ -2,14 +2,11 @@ import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   LogOut,
-  Mic,
-  MicOff,
   MessageCircle,
   Command,
   ChevronDown,
   Database,
   Bot,
-  Image,
   Headphones,
   HeadphonesIcon,
 } from "lucide-react";
@@ -53,11 +50,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
   
-  // Voice Recording state (existing feature)
-  const [isRecording, setIsRecording] = useState(false);
-  const [voiceMediaRecorder, setVoiceMediaRecorder] = useState<MediaRecorder | null>(null);
+  // Audio result for display
   const [audioResult, setAudioResult] = useState<string | null>(null);
-  const chunks = useRef<Blob[]>([]);
 
   // Response mode dropdown state
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -160,24 +154,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     };
   }, [isAuthenticated, onQuestionDetected, onAudioStreamStateChange]);
 
-  // Keyboard shortcut listener for voice recording
-  useEffect(() => {
-    const handleVoiceRecordingTrigger = () => {
-      handleRecordClick();
-    };
-
-    document.addEventListener(
-      "trigger-voice-recording",
-      handleVoiceRecordingTrigger
-    );
-
-    return () => {
-      document.removeEventListener(
-        "trigger-voice-recording",
-        handleVoiceRecordingTrigger
-      );
-    };
-  }, [isRecording, voiceMediaRecorder]);
 
   const loadCollections = async () => {
     if (!isAuthenticated) return;
@@ -534,93 +510,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     setIsTooltipVisible(false);
   };
 
-  const handleRecordClick = async () => {
-    if (!isRecording) {
-      // Debug current mode before recording
-      console.log('[QueueCommands] Starting audio recording with mode:', {
-        type: responseMode.type,
-        collectionId: responseMode.collectionId,
-        collectionName: responseMode.collectionName,
-        willUseRAG: responseMode.type === "qna" && !!responseMode.collectionId
-      });
-
-      // Start recording
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-        });
-        const recorder = new MediaRecorder(stream);
-        recorder.ondataavailable = (e) => chunks.current.push(e.data);
-        recorder.onstop = async () => {
-          const blob = new Blob(chunks.current, {
-            type: chunks.current[0]?.type || "audio/webm",
-          });
-          chunks.current = [];
-          const reader = new FileReader();
-          reader.onloadend = async () => {
-            const base64Data = (reader.result as string).split(",")[1];
-            try {
-              // Pass collection ID if in QnA mode
-              const collectionId =
-                responseMode.type === "qna"
-                  ? responseMode.collectionId
-                  : undefined;
-
-              // Debug logging for RAG functionality
-              console.log('[QueueCommands] Audio RAG Debug:', {
-                responseMode: responseMode,
-                responseModeType: responseMode.type,
-                responseModeCollectionId: responseMode.collectionId,
-                responseModeCollectionName: responseMode.collectionName,
-                collectionId: collectionId,
-                isQnAMode: responseMode.type === "qna",
-                hasCollectionId: !!collectionId,
-                willUseRAG: responseMode.type === "qna" && !!collectionId
-              });
-
-              const result = await window.electronAPI.analyzeAudioFromBase64(
-                base64Data,
-                blob.type,
-                collectionId
-              );
-
-              // Debug the result
-              console.log('[QueueCommands] Audio analysis result:', {
-                hasResult: !!result,
-                textLength: result?.text?.length || 0,
-                hasRagContext: !!(result as any)?.ragContext
-              });
-
-              setAudioResult(result.text);
-            } catch (err: any) {
-              // Check if this is a usage limit error
-              if (err.message && err.message.includes('Usage limit exceeded') ||
-                err.message && err.message.includes('Monthly limit') ||
-                err.message && err.message.includes('Insufficient usage remaining')) {
-                // Show usage limit notification by triggering an event
-                const limitEvent = new CustomEvent('usage-limit-exceeded');
-                document.dispatchEvent(limitEvent);
-                return; // Don't set audio result for usage limit errors
-              } else {
-                setAudioResult("Audio analysis failed.");
-              }
-            }
-          };
-          reader.readAsDataURL(blob);
-        };
-        setVoiceMediaRecorder(recorder);
-        recorder.start();
-        setIsRecording(true);
-      } catch (err) {
-        setAudioResult("Could not start recording.");
-      }
-    } else {
-      // Stop recording
-      voiceMediaRecorder?.stop();
-      setIsRecording(false);
-      setVoiceMediaRecorder(null);
-    }
-  };
 
   // Remove handleChatSend function
 
@@ -670,27 +559,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           </div>
         )}
 
-        {/* Voice Recording Button */}
-        <div className="flex items-center gap-2">
-          <button
-            className={`morphism-button px-2 py-1 text-[11px] leading-none text-white/70 flex items-center gap-1 ${isRecording ? "!bg-red-500/70 hover:!bg-red-500/90" : ""
-              }`}
-            onClick={handleRecordClick}
-            type="button"
-          >
-            {isRecording ? (
-              <>
-                <MicOff className="w-4 h-4 mr-1" />
-                <span className="animate-pulse">録音停止</span>
-              </>
-            ) : (
-              <>
-                <Mic className="w-3 h-3 mr-1" />
-                <span>録音開始</span>
-              </>
-            )}
-          </button>
-        </div>
 
         {/* Always-On Listen Button */}
         {isAuthenticated && (
@@ -708,12 +576,12 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
               {isListening ? (
                 <>
                   <Headphones className="w-3 h-3 mr-1" />
-                  <span className="animate-pulse">リスニング中</span>
+                  <span className="animate-pulse">録音停止</span>
                 </>
               ) : (
                 <>
                   <HeadphonesIcon className="w-3 h-3 mr-1" />
-                  <span>リスニング</span>
+                  <span>録音開始</span>
                 </>
               )}
             </button>

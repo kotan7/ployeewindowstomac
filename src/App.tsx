@@ -66,7 +66,6 @@ declare global {
       moveWindowDown: () => Promise<void>;
       quitApp: () => Promise<void>;
       invoke: (channel: string, ...args: any[]) => Promise<any>;
-      onVoiceRecordingTrigger: (callback: () => void) => () => void;
       onChatToggle: (callback: () => void) => () => void;
 
       // Audio Stream event listeners

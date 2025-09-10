@@ -379,13 +379,6 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
 
   // Keyboard shortcuts handler
   useEffect(() => {
-    // Handle voice recording trigger
-    const handleVoiceRecording = () => {
-      // Create a custom event to trigger voice recording in QueueCommands
-      const event = new CustomEvent("trigger-voice-recording");
-      document.dispatchEvent(event);
-    };
-
     const handleChatToggle = () => {
       setIsChatOpen((prev) => !prev);
     };
@@ -399,13 +392,10 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
     const setupIpcListeners = () => {
       try {
         if (window.electronAPI) {
-          const cleanupVoiceRecording =
-            window.electronAPI.onVoiceRecordingTrigger(handleVoiceRecording);
           const cleanupChatToggle =
             window.electronAPI.onChatToggle(handleChatToggle);
 
           return () => {
-            cleanupVoiceRecording();
             cleanupChatToggle();
           };
         }
