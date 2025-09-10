@@ -10,7 +10,13 @@ import { UsageTracker } from "./UsageTracker"
 import { AudioStreamProcessor } from "./AudioStreamProcessor"
 import dotenv from "dotenv"
 
-dotenv.config()
+// Load env in packaged app as well
+try {
+  const envPath = require('path').join(process.resourcesPath || process.cwd(), '.env')
+  dotenv.config({ path: envPath })
+} catch {
+  dotenv.config()
+}
 
 export class AppState {
   private static instance: AppState | null = null

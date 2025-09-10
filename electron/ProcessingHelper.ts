@@ -4,7 +4,12 @@ import { AppState } from "./main"
 import { LLMHelper } from "./LLMHelper"
 import dotenv from "dotenv"
 
-dotenv.config()
+try {
+  const envPath = require('path').join(process.resourcesPath || process.cwd(), '.env')
+  dotenv.config({ path: envPath })
+} catch {
+  dotenv.config()
+}
 
 const isDev = process.env.NODE_ENV === "development"
 const isDevTest = process.env.IS_DEV_TEST === "true"
