@@ -145,8 +145,7 @@ export class AppState {
           maxBatchSize: 3
         })
         
-        // Set LLMHelper for question refinement
-        this.audioStreamProcessor.setLLMHelper(this.processingHelper.getLLMHelper())
+        // LLMHelper no longer needed - questions are refined algorithmically
         
         // Setup event listeners for audio stream events
         this.setupAudioStreamEvents()
@@ -415,10 +414,6 @@ export class AppState {
     // Forward audio stream events to renderer process
     this.audioStreamProcessor.on('question-detected', (question) => {
       mainWindow.webContents.send('audio-question-detected', question);
-    });
-
-    this.audioStreamProcessor.on('batch-processed', (questions) => {
-      mainWindow.webContents.send('audio-batch-processed', questions);
     });
 
     this.audioStreamProcessor.on('transcription-completed', (result) => {

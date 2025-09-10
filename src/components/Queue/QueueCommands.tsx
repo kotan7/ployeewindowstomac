@@ -37,7 +37,6 @@ interface QueueCommandsProps {
   onResponseModeChange?: (mode: ResponseMode) => void;
   isAuthenticated?: boolean;
   onQuestionDetected?: (question: DetectedQuestion) => void;
-  onAudioBatchProcessed?: (questions: DetectedQuestion[]) => void;
   onAudioStreamStateChange?: (state: AudioStreamState) => void;
 }
 
@@ -49,7 +48,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   onResponseModeChange,
   isAuthenticated = false,
   onQuestionDetected,
-  onAudioBatchProcessed,
   onAudioStreamStateChange,
 }) => {
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
@@ -140,13 +138,8 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
 
     const cleanupFunctions = [
       window.electronAPI.onAudioQuestionDetected((question: DetectedQuestion) => {
-        console.log('[QueueCommands] Question detected:', question);
+        console.log('[QueueCommands] Question detected (pre-refined):', question);
         onQuestionDetected?.(question);
-      }),
-      
-      window.electronAPI.onAudioBatchProcessed((questions: DetectedQuestion[]) => {
-        console.log('[QueueCommands] Batch processed:', questions);
-        onAudioBatchProcessed?.(questions);
       }),
       
       window.electronAPI.onAudioStreamStateChanged((state: AudioStreamState) => {
@@ -165,7 +158,7 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     return () => {
       cleanupFunctions.forEach((cleanup) => cleanup());
     };
-  }, [isAuthenticated, onQuestionDetected, onAudioBatchProcessed, onAudioStreamStateChange]);
+  }, [isAuthenticated, onQuestionDetected, onAudioStreamStateChange]);
 
   // Keyboard shortcut listener for voice recording
   useEffect(() => {

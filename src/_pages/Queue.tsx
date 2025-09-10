@@ -309,24 +309,9 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
 
   // Audio stream event handlers
   const handleQuestionDetected = (question: DetectedQuestion) => {
-    console.log('[Queue] Question detected:', question);
+    console.log('[Queue] Question detected (pre-refined):', question);
+    // Questions now come pre-refined from the new immediate processing pipeline
     setDetectedQuestions(prev => [...prev, question]);
-  };
-
-  const handleAudioBatchProcessed = (refinedQuestions: DetectedQuestion[]) => {
-    console.log('[Queue] Batch processed, refined questions:', refinedQuestions);
-    // Update existing questions with refined text
-    setDetectedQuestions(prev => {
-      const updated = [...prev];
-      refinedQuestions.forEach(refined => {
-        const existing = updated.find(q => q.id === refined.id);
-        if (existing) {
-          // Update the existing question with refined text
-          (existing as any).refinedText = (refined as any).refinedText || refined.text;
-        }
-      });
-      return updated;
-    });
   };
 
   const handleAudioStreamStateChange = (state: AudioStreamState) => {
@@ -491,7 +476,6 @@ const Queue: React.FC<QueueProps> = ({ setView, onSignOut }) => {
                 onResponseModeChange={handleResponseModeChange}
                 isAuthenticated={true} // User is always authenticated when Queue is rendered
                 onQuestionDetected={handleQuestionDetected}
-                onAudioBatchProcessed={handleAudioBatchProcessed}
                 onAudioStreamStateChange={handleAudioStreamStateChange}
               />
             </div>

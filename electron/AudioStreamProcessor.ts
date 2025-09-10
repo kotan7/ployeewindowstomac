@@ -5,15 +5,13 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { QuestionDetector } from "./QuestionDetector";
-import { LLMHelper } from "./LLMHelper";
 import {
   AudioChunk,
   AudioStreamState,
   AudioStreamConfig,
   AudioStreamEvents,
   TranscriptionResult,
-  DetectedQuestion,
-  QuestionBatch
+  DetectedQuestion
 } from "../src/types/audio-stream";
 
 export class AudioStreamProcessor extends EventEmitter {
@@ -21,11 +19,6 @@ export class AudioStreamProcessor extends EventEmitter {
   private config: AudioStreamConfig;
   private questionDetector: QuestionDetector;
   private openai: OpenAI;
-  private llmHelper: LLMHelper | null = null;
-  
-  // Batch processing
-  private batchTimeout: NodeJS.Timeout | null = null;
-  private lastBatchTime: number = 0;
   
   // Audio processing
   private currentAudioData: Float32Array[] = [];
@@ -34,6 +27,20 @@ export class AudioStreamProcessor extends EventEmitter {
   private tempBuffer: Float32Array | null = null;
   private lastChunkTime: number = 0;
   private accumulatedSamples: number = 0;
+
+  // Japanese filler words and patterns to remove
+  private readonly fillerWords = new Set([
+    'えー', 'あー', 'うー', 'んー', 'そのー', 'あのー', 'えーっと', 'あーと',
+    'まあ', 'なんか', 'ちょっと', 'やっぱり', 'やっぱ', 'だから', 'でも',
+    'うん', 'はい', 'そう', 'ですね', 'ですが', 'ただ', 'まず', 'それで',
+    'というか', 'てか', 'なので', 'けど', 'けれど', 'しかし', 'でも',
+    'ー', '〜', 'う〜ん', 'え〜', 'あ〜', 'そ〜', 'ん〜'
+  ]);
+
+  private readonly questionStarters = new Set([
+    'どう', 'どの', 'どこ', 'いつ', 'なぜ', 'なん', '何', 'だれ', '誰',
+    'どちら', 'どれ', 'いくら', 'いくつ', 'どのよう', 'どんな'
+  ]);
 
   constructor(openaiApiKey: string, config?: Partial<AudioStreamConfig>) {
     super();
@@ -46,18 +53,19 @@ export class AudioStreamProcessor extends EventEmitter {
     this.openai = new OpenAI({ apiKey: openaiApiKey });
     this.questionDetector = new QuestionDetector();
     
-    // Default configuration
+    // Simplified configuration - removed batching
     this.config = {
       sampleRate: 16000,
-      chunkDuration: 1000, // 1 second chunks for processing
-      silenceThreshold: 800, // 800ms silence threshold from memory
-      maxWords: 40, // 40 words max per chunk from memory
+      chunkDuration: 1000,
+      silenceThreshold: 800,
+      maxWords: 40,
       questionDetectionEnabled: true,
-      batchInterval: 10000, // 30 seconds batch processing
-      maxBatchSize: 3,
+      batchInterval: 0, // Not used anymore
+      maxBatchSize: 0, // Not used anymore
       ...config
     };
 
+    // Simplified state - removed batch processor
     this.state = {
       isListening: false,
       isProcessing: false,
@@ -70,15 +78,7 @@ export class AudioStreamProcessor extends EventEmitter {
       }
     };
 
-    this.setupBatchProcessor();
-    console.log('[AudioStreamProcessor] Initialized with OpenAI API key');
-  }
-
-  /**
-   * Set LLMHelper for question refinement
-   */
-  public setLLMHelper(llmHelper: LLMHelper): void {
-    this.llmHelper = llmHelper;
+    console.log('[AudioStreamProcessor] Initialized with immediate question refinement');
   }
 
   /**
@@ -96,9 +96,6 @@ export class AudioStreamProcessor extends EventEmitter {
       this.emit('state-changed', { ...this.state });
       
       console.log('[AudioStreamProcessor] Started listening for audio');
-      
-      // Note: Actual audio capture will be handled by the renderer process
-      // This service processes the audio chunks received via IPC
       
     } catch (error) {
       this.state.isListening = false;
@@ -125,11 +122,6 @@ export class AudioStreamProcessor extends EventEmitter {
       this.currentAudioData = [];
       this.wordCount = 0;
       
-      // Process any remaining questions in batch
-      if (this.state.batchProcessor.pendingQuestions.length > 0) {
-        await this.processBatch();
-      }
-      
       this.emit('state-changed', { ...this.state });
       console.log('[AudioStreamProcessor] Stopped listening');
       
@@ -155,7 +147,7 @@ export class AudioStreamProcessor extends EventEmitter {
       const float32Array = new Float32Array(audioData.length / 2);
       for (let i = 0; i < float32Array.length; i++) {
         const sample = audioData.readInt16LE(i * 2);
-        float32Array[i] = sample / 32768.0; // Convert from 16-bit PCM to float
+        float32Array[i] = sample / 32768.0;
       }
       
       // Add to current audio accumulation
@@ -194,14 +186,14 @@ export class AudioStreamProcessor extends EventEmitter {
     const timeSinceLastChunk = now - this.lastChunkTime;
     
     // Calculate accumulated audio duration (assuming 16kHz sample rate)
-    const accumulatedDuration = (this.accumulatedSamples / this.config.sampleRate) * 1000; // in ms
+    const accumulatedDuration = (this.accumulatedSamples / this.config.sampleRate) * 1000;
     
     // Create chunk if:
     // 1. We have accumulated enough audio (5+ seconds) OR
     // 2. We haven't created a chunk in a while (10+ seconds) OR  
     // 3. Word count exceeds limit
-    const shouldCreateByDuration = accumulatedDuration >= 5000; // 5 seconds
-    const shouldCreateByTime = timeSinceLastChunk >= 10000; // 10 seconds
+    const shouldCreateByDuration = accumulatedDuration >= 5000;
+    const shouldCreateByTime = timeSinceLastChunk >= 10000;
     const shouldCreateByWords = this.wordCount >= this.config.maxWords;
     
     const shouldCreate = shouldCreateByDuration || shouldCreateByTime || shouldCreateByWords;
@@ -230,19 +222,11 @@ export class AudioStreamProcessor extends EventEmitter {
         offset += array.length;
       }
       
-      // Convert to 16-bit PCM Buffer for Whisper API
-      const pcmBuffer = Buffer.alloc(combinedArray.length * 2);
-      for (let i = 0; i < combinedArray.length; i++) {
-        const sample = Math.max(-1, Math.min(1, combinedArray[i]));
-        const value = Math.floor(sample < 0 ? sample * 32768 : sample * 32767);
-        pcmBuffer.writeInt16LE(value, i * 2);
-      }
-      
       const chunk: AudioChunk = {
         id: uuidv4(),
         data: combinedArray,
         timestamp: Date.now(),
-        duration: this.calculateDuration(pcmBuffer),
+        duration: this.calculateDuration(combinedArray.length),
         wordCount: this.wordCount
       };
 
@@ -285,7 +269,7 @@ export class AudioStreamProcessor extends EventEmitter {
       this.state.isProcessing = true;
       this.emit('state-changed', { ...this.state });
 
-      // Convert buffer to temporary file for Whisper API
+      // Convert to PCM buffer for Whisper API
       const pcmBuffer = Buffer.alloc(chunk.data.length * 2);
       for (let i = 0; i < chunk.data.length; i++) {
         const sample = Math.max(-1, Math.min(1, chunk.data[i]));
@@ -295,12 +279,12 @@ export class AudioStreamProcessor extends EventEmitter {
       
       console.log('[AudioStreamProcessor] Created PCM buffer, size:', pcmBuffer.length);
       const tempFilePath = await this.createTempAudioFile(pcmBuffer);
-      console.log('[AudioStreamProcessor] Created WAV file:', tempFilePath, 'with proper headers');
+      console.log('[AudioStreamProcessor] Created WAV file:', tempFilePath);
       
       const transcription = await this.openai.audio.transcriptions.create({
         file: fs.createReadStream(tempFilePath),
         model: "whisper-1",
-        language: "ja", // Japanese language preference from memory
+        language: "ja",
         response_format: "json",
         temperature: 0.2
       });
@@ -317,17 +301,17 @@ export class AudioStreamProcessor extends EventEmitter {
         id: uuidv4(),
         text: transcription.text || "",
         timestamp: chunk.timestamp,
-        confidence: 1.0, // Whisper doesn't provide confidence scores
-        isQuestion: false, // Will be determined by question detector
+        confidence: 1.0,
+        isQuestion: false,
         originalChunkId: chunk.id
       };
 
       this.emit('transcription-completed', result);
 
-      // Detect questions in transcription
+      // Detect and immediately refine questions
       if (result.text.trim()) {
         console.log('[AudioStreamProcessor] Processing transcription for questions:', result.text);
-        await this.detectQuestions(result);
+        await this.detectAndRefineQuestions(result);
       } else {
         console.log('[AudioStreamProcessor] No text in transcription result');
       }
@@ -342,31 +326,35 @@ export class AudioStreamProcessor extends EventEmitter {
   }
 
   /**
-   * Detect questions in transcription
+   * Detect questions and immediately refine them algorithmically
    */
-  private async detectQuestions(transcription: TranscriptionResult): Promise<void> {
+  private async detectAndRefineQuestions(transcription: TranscriptionResult): Promise<void> {
     try {
       const detectedQuestion = this.questionDetector.detectQuestion(transcription);
       
       if (detectedQuestion && this.questionDetector.isValidQuestion(detectedQuestion)) {
+        console.log('[AudioStreamProcessor] Question detected:', detectedQuestion.text);
+        
+        // Immediately refine the question algorithmically
+        const refinedText = this.refineQuestionAlgorithmically(detectedQuestion.text);
+        
+        // Create refined question object
+        const refinedQuestion: DetectedQuestion & { refinedText?: string } = {
+          ...detectedQuestion,
+          refinedText: refinedText
+        };
+        
         // Add to question buffer
-        this.state.questionBuffer.push(detectedQuestion);
+        this.state.questionBuffer.push(refinedQuestion);
         
-        // Add to pending batch
-        this.state.batchProcessor.pendingQuestions.push(detectedQuestion);
-        
-        this.emit('question-detected', detectedQuestion);
+        // Emit immediately - no batching delay
+        this.emit('question-detected', refinedQuestion);
         this.emit('state-changed', { ...this.state });
         
-        console.log('[AudioStreamProcessor] Question detected:', detectedQuestion.text);
-
-        // Hybrid batching: if pending reaches maxBatchSize and not processing, trigger immediately
-        const pendingCount = this.state.batchProcessor.pendingQuestions.length;
-        if (!this.state.batchProcessor.isProcessing && pendingCount >= this.config.maxBatchSize) {
-          console.log('[AudioStreamProcessor] Pending reached maxBatchSize, triggering immediate batch');
-          await this.processBatch();
-          // processBatch will update lastBatchTime, effectively resetting the timer
-        }
+        console.log('[AudioStreamProcessor] Question refined and emitted:', {
+          original: detectedQuestion.text,
+          refined: refinedText
+        });
       }
       
     } catch (error) {
@@ -376,148 +364,89 @@ export class AudioStreamProcessor extends EventEmitter {
   }
 
   /**
-   * Setup batch processor for question refinement
+   * Algorithmically refine question text by removing fillers and cleaning up
    */
-  private setupBatchProcessor(): void {
-    // Process batch every 30 seconds or when max batch size reached
-    this.batchTimeout = setInterval(async () => {
-      const now = Date.now();
-      const timeSinceLastBatch = now - this.lastBatchTime;
-      
-      if (timeSinceLastBatch >= this.config.batchInterval && 
-          this.state.batchProcessor.pendingQuestions.length > 0 &&
-          !this.state.batchProcessor.isProcessing) {
-        await this.processBatch();
-      }
-    }, 5000); // Check every 5 seconds
-  }
-
-  /**
-   * Process batch of questions for refinement using Gemini
-   */
-  private async processBatch(): Promise<void> {
-    if (this.state.batchProcessor.isProcessing || 
-        this.state.batchProcessor.pendingQuestions.length === 0) {
-      return;
-    }
-
+  private refineQuestionAlgorithmically(text: string): string {
+    console.log('[AudioStreamProcessor] Starting algorithmic refinement for:', text);
+    
     try {
-      this.state.batchProcessor.isProcessing = true;
-      this.lastBatchTime = Date.now();
+      let refined = text.toLowerCase().trim();
       
-      // Take up to maxBatchSize for this run, leave remainder pending
-      const toTake = Math.min(this.config.maxBatchSize, this.state.batchProcessor.pendingQuestions.length);
-      const questionsToProcess = this.state.batchProcessor.pendingQuestions.splice(0, toTake);
+      // Step 1: Remove common Japanese filler words
+      const words = refined.split(/[\s、。！？]+/).filter(word => word.length > 0);
+      const cleanedWords = words.filter(word => !this.fillerWords.has(word));
       
-      console.log(`[AudioStreamProcessor] Processing batch of ${questionsToProcess.length} questions`);
-
-      if (this.llmHelper) {
-        // Use Gemini to refine questions
-        const refinedQuestions = await this.refineQuestionsWithGemini(questionsToProcess);
-        
-        // Update questions with refined text
-        refinedQuestions.forEach(refined => {
-          const original = this.state.questionBuffer.find(q => q.id === refined.id);
-          if (original) {
-            // Preserve original but store refined text separately
-            (original as any).refinedText = (refined as any).refinedText || refined.text;
-          }
-        });
-        
-        this.emit('batch-processed', refinedQuestions);
-        this.emit('state-changed', { ...this.state });
+      // Step 2: Remove repetitive patterns (like "あのあの", "えーえー")
+      const deduplicatedWords: string[] = [];
+      let lastWord = '';
+      for (const word of cleanedWords) {
+        if (word !== lastWord || !this.fillerWords.has(word)) {
+          deduplicatedWords.push(word);
+        }
+        lastWord = word;
       }
       
-    } catch (error) {
-      console.error('[AudioStreamProcessor] Batch processing error:', error);
-      this.emit('error', error as Error);
-    } finally {
-      this.state.batchProcessor.isProcessing = false;
-    }
-  }
-
-  /**
-   * Use Gemini to refine and improve question quality
-   */
-  /**
- * Simplified method to refine questions using Gemini
- * Replace the existing refineQuestionsWithGemini method with this one
- */
-  private async refineQuestionsWithGemini(questions: DetectedQuestion[]): Promise<DetectedQuestion[]> {
-    if (!this.llmHelper || questions.length === 0) return questions;
-  
-    try {
-      // Preprocess questions (deduplication, filtering)
-      const preprocessed = this.questionDetector.preprocessQuestions(questions);
+      // Step 3: Rejoin and clean up spacing
+      refined = deduplicatedWords.join(' ');
       
-      console.log(`[AudioStreamProcessor] Refining ${preprocessed.length} questions individually`);
+      // Step 4: Remove multiple spaces and normalize
+      refined = refined.replace(/\s+/g, ' ').trim();
       
-      const refinedQuestions: DetectedQuestion[] = [];
+      // Step 5: Remove trailing particles that don't add meaning to questions
+      refined = refined.replace(/[、。！？\s]*$/, '');
+      refined = refined.replace(/\s*(です|ます|だ|である|でしょう|かな|よね)?\s*$/i, '');
       
-      // Process each question individually to prevent merging
-      for (let i = 0; i < preprocessed.length; i++) {
-        const question = preprocessed[i];
+      // Step 6: Ensure question ends appropriately
+      if (!refined.endsWith('？') && !refined.endsWith('?')) {
+        // Check if it's actually a question by looking for question words
+        const hasQuestionWord = Array.from(this.questionStarters).some(starter => 
+          refined.includes(starter)
+        );
         
-        try {
-          const prompt = `以下の音声認識で検出された質問文を、意味を変えずに自然で読みやすい日本語に修正してください。
-  音声認識の誤りや不自然な表現のみを修正し、質問の内容や意味は絶対に変更しないでください。
-  
-  質問: ${question.text}
-  
-  修正された質問のみを1行で返してください。余計な説明は不要です。`;
-  
-          console.log(`[AudioStreamProcessor] Processing question ${i + 1}:`, question.text);
-          
-          const result = await this.llmHelper.chatWithGemini(prompt);
-          console.log(`[AudioStreamProcessor] Gemini result for question ${i + 1}:`, result);
-          
-          // Clean up the result
-          const refinedText = result
-            .split('\n')[0] // Take only first line
-            .trim()
-            .replace(/^修正版[：:]\s*/, '') // Remove "修正版:" prefix
-            .replace(/^修正された質問[：:]\s*/, '') // Remove "修正された質問:" prefix
-            .replace(/^[\d]+[.)：:]\s*/, '') // Remove numbering
-            .replace(/^[-•*]\s*/, '') // Remove bullets
-            .trim();
-          
-          refinedQuestions.push({
-            ...question,
-            refinedText: refinedText.length > 0 ? refinedText : question.text
-          });
-          
-          console.log(`[AudioStreamProcessor] Refined question ${i + 1}:`, {
-            original: question.text,
-            refined: refinedText
-          });
-          
-        } catch (error) {
-          console.error(`[AudioStreamProcessor] Error refining question ${i + 1}:`, error);
-          // Fall back to original text if refinement fails
-          refinedQuestions.push({
-            ...question,
-            refinedText: question.text
-          });
+        if (hasQuestionWord || this.looksLikeQuestion(refined)) {
+          refined += '？';
         }
       }
       
-      console.log('[AudioStreamProcessor] All questions refined:', 
-        refinedQuestions.map((q, i) => ({
-          index: i,
-          original: q.text,
-          refined: (q as any).refinedText
-        }))
-      );
+      // Step 7: Capitalize first character if it's a Latin character
+      if (refined.length > 0 && /[a-zA-Z]/.test(refined[0])) {
+        refined = refined[0].toUpperCase() + refined.slice(1);
+      }
       
-      return refinedQuestions;
+      // Fallback: if we cleaned too much, return original
+      if (refined.length < 3 || refined.replace(/[？?]/g, '').trim().length < 2) {
+        console.log('[AudioStreamProcessor] Refinement too aggressive, using original');
+        return text;
+      }
+      
+      console.log('[AudioStreamProcessor] Algorithmic refinement complete:', {
+        original: text,
+        refined: refined,
+        removedWords: words.length - cleanedWords.length
+      });
+      
+      return refined;
       
     } catch (error) {
-      console.error('[AudioStreamProcessor] Gemini refinement error:', error);
-      // Return original questions if refinement fails
-      return questions;
+      console.error('[AudioStreamProcessor] Error in algorithmic refinement:', error);
+      return text; // Return original on error
     }
   }
-  
+
+  /**
+   * Check if text structure looks like a question
+   */
+  private looksLikeQuestion(text: string): boolean {
+    // Check for interrogative patterns in Japanese
+    const questionPatterns = [
+      /どう.*/, /どの.*/, /どこ.*/, /いつ.*/, /なぜ.*/, /なん.*/, /何.*/, 
+      /だれ.*/, /誰.*/, /どちら.*/, /どれ.*/, /いくら.*/, /いくつ.*/,
+      /.*ですか/, /.*ますか/, /.*でしょうか/, /.*かしら/, /.*のか/
+    ];
+    
+    return questionPatterns.some(pattern => pattern.test(text));
+  }
+
   /**
    * Get current state
    */
@@ -537,56 +466,51 @@ export class AudioStreamProcessor extends EventEmitter {
    */
   public clearQuestions(): void {
     this.state.questionBuffer = [];
-    this.state.batchProcessor.pendingQuestions = [];
     this.emit('state-changed', { ...this.state });
   }
 
   /**
    * Helper methods for audio processing
    */
-  private calculateDuration(buffer: Buffer): number {
-    // Estimate duration based on buffer size and sample rate
-    const bytesPerSample = 2; // 16-bit audio
-    const samples = buffer.length / bytesPerSample;
-    return (samples / this.config.sampleRate) * 1000; // Return in milliseconds
+  private calculateDuration(sampleCount: number): number {
+    return (sampleCount / this.config.sampleRate) * 1000;
   }
 
   private async createTempAudioFile(buffer: Buffer): Promise<string> {
-    // Create a proper WAV file with headers for Whisper API
     const tempPath = path.join(os.tmpdir(), `audio_${Date.now()}.wav`);
     
     // WAV file parameters
-    const sampleRate = this.config.sampleRate; // 16000 Hz
-    const channels = 1; // Mono
-    const bitsPerSample = 16; // 16-bit
-    const bytesPerSample = bitsPerSample / 8; // 2 bytes
-    const blockAlign = channels * bytesPerSample; // 2
-    const byteRate = sampleRate * blockAlign; // 32000
+    const sampleRate = this.config.sampleRate;
+    const channels = 1;
+    const bitsPerSample = 16;
+    const bytesPerSample = bitsPerSample / 8;
+    const blockAlign = channels * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
     const dataSize = buffer.length;
-    const fileSize = 36 + dataSize; // Header size (44) - 8 + data size
+    const fileSize = 36 + dataSize;
     
     // Create WAV header (44 bytes total)
     const header = Buffer.alloc(44);
     let offset = 0;
     
-    // RIFF Header (12 bytes)
+    // RIFF Header
     header.write('RIFF', offset); offset += 4;
     header.writeUInt32LE(fileSize, offset); offset += 4;
     header.write('WAVE', offset); offset += 4;
     
-    // Format Chunk (24 bytes)
+    // Format Chunk
     header.write('fmt ', offset); offset += 4;
-    header.writeUInt32LE(16, offset); offset += 4; // Format chunk size
-    header.writeUInt16LE(1, offset); offset += 2; // Audio format (1 = PCM)
-    header.writeUInt16LE(channels, offset); offset += 2; // Number of channels
-    header.writeUInt32LE(sampleRate, offset); offset += 4; // Sample rate
-    header.writeUInt32LE(byteRate, offset); offset += 4; // Byte rate
-    header.writeUInt16LE(blockAlign, offset); offset += 2; // Block align
-    header.writeUInt16LE(bitsPerSample, offset); offset += 2; // Bits per sample
+    header.writeUInt32LE(16, offset); offset += 4;
+    header.writeUInt16LE(1, offset); offset += 2;
+    header.writeUInt16LE(channels, offset); offset += 2;
+    header.writeUInt32LE(sampleRate, offset); offset += 4;
+    header.writeUInt32LE(byteRate, offset); offset += 4;
+    header.writeUInt16LE(blockAlign, offset); offset += 2;
+    header.writeUInt16LE(bitsPerSample, offset); offset += 2;
     
-    // Data Chunk Header (8 bytes)
+    // Data Chunk Header
     header.write('data', offset); offset += 4;
-    header.writeUInt32LE(dataSize, offset); // Data size
+    header.writeUInt32LE(dataSize, offset);
     
     // Combine header and PCM data
     const wavFile = Buffer.concat([header, buffer]);
@@ -596,11 +520,9 @@ export class AudioStreamProcessor extends EventEmitter {
   }
 
   private async cleanupTempFile(filePath: string): Promise<void> {
-    // Clean up temporary file
     try {
       await fs.promises.unlink(filePath);
     } catch (error) {
-      // Ignore cleanup errors
       console.warn('[AudioStreamProcessor] Failed to cleanup temp file:', filePath);
     }
   }
@@ -609,14 +531,8 @@ export class AudioStreamProcessor extends EventEmitter {
    * Cleanup resources
    */
   public destroy(): void {
-    if (this.batchTimeout) {
-      clearInterval(this.batchTimeout);
-      this.batchTimeout = null;
-    }
-    
     this.removeAllListeners();
     this.currentAudioData = [];
     this.state.questionBuffer = [];
-    this.state.batchProcessor.pendingQuestions = [];
   }
 }
