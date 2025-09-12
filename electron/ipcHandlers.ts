@@ -2,6 +2,7 @@
 
 import { ipcMain, app, shell } from "electron"
 import { AppState } from "./main"
+import { DocumentProcessingOrchestrator, DocumentProcessingOptions } from "./DocumentProcessingOrchestrator"
 
 export function initializeIpcHandlers(appState: AppState): void {
   // Debug logging handler to show frontend logs in terminal
@@ -498,6 +499,248 @@ export function initializeIpcHandlers(appState: AppState): void {
       return { response, timestamp: Date.now() };
     } catch (error: any) {
       console.error("Error answering question:", error);
+      throw error;
+    }
+  });
+
+  // Document Processing handlers
+  ipcMain.handle("document-validate", async (event, buffer: ArrayBuffer, fileName: string) => {
+    try {
+      const orchestrator = new DocumentProcessingOrchestrator();
+      const result = await orchestrator.validateFile(Buffer.from(buffer), fileName);
+      return result;
+    } catch (error: any) {
+      console.error("Error in document-validate handler:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("document-process", async (event, buffer: ArrayBuffer, fileName: string, options?: DocumentProcessingOptions) => {
+    try {
+      // Check if user is authenticated
+      const user = appState.authService.getCurrentUser();
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+
+      // Check usage limits - document processing is expensive, count as 5 questions
+      const accessToken = appState.authService.getAccessToken();
+      if (accessToken) {
+        const usageCheck = await appState.usageTracker.checkCanAskQuestion(accessToken);
+        if (!usageCheck.allowed) {
+          const error = new Error(usageCheck.error || 'Usage limit exceeded');
+          (error as any).code = 'USAGE_LIMIT_EXCEEDED';
+          (error as any).remaining = usageCheck.remaining || 0;
+          throw error;
+        }
+        
+        // Check if we can use 5 questions (document processing is expensive)
+        if (usageCheck.remaining !== undefined && usageCheck.remaining < 5) {
+          const error = new Error(`Insufficient usage remaining. Document processing requires 5 questions but only ${usageCheck.remaining} remaining.`);
+          (error as any).code = 'USAGE_LIMIT_EXCEEDED';
+          (error as any).remaining = usageCheck.remaining;
+          throw error;
+        }
+
+        // Increment usage by 5 (document processing is expensive)
+        const usageResult = await appState.usageTracker.incrementQuestionUsage(accessToken, 5);
+        if (!usageResult.success) {
+          console.warn('Usage tracking failed, but continuing with request:', usageResult.error);
+        }
+      }
+
+      const orchestrator = new DocumentProcessingOrchestrator();
+      
+      // Set up progress callback
+      const progressCallback = (status: any) => {
+        const mainWindow = appState.getMainWindow();
+        if (mainWindow) {
+          mainWindow.webContents.send('document-processing-progress', status);
+        }
+      };
+
+      const result = await orchestrator.processDocumentFromBuffer(
+        Buffer.from(buffer), 
+        fileName, 
+        user.id,
+        options,
+        progressCallback
+      );
+      
+      return result;
+    } catch (error: any) {
+      console.error("Error in document-process handler:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("document-finalize-collection", async (event, sessionId: string, approvedItems: string[], collectionName?: string, collectionDescription?: string) => {
+    try {
+      const user = appState.authService.getCurrentUser();
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+
+      const orchestrator = new DocumentProcessingOrchestrator();
+      const result = await orchestrator.finalizeCollection(
+        sessionId,
+        user.id,
+        approvedItems,
+        collectionName,
+        collectionDescription
+      );
+      
+      return result;
+    } catch (error: any) {
+      console.error("Error in document-finalize-collection handler:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("document-get-review-data", async (event, sessionId: string) => {
+    try {
+      const orchestrator = new DocumentProcessingOrchestrator();
+      const result = await orchestrator.getReviewData(sessionId);
+      return result;
+    } catch (error: any) {
+      console.error("Error in document-get-review-data handler:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("document-cancel-processing", async (event, sessionId: string) => {
+    try {
+      const orchestrator = new DocumentProcessingOrchestrator();
+      const result = await orchestrator.cancelProcessing(sessionId);
+      return result;
+    } catch (error: any) {
+      console.error("Error in document-cancel-processing handler:", error);
+      throw error;
+    }
+  });
+
+  // === DOCUMENT PROCESSING HANDLERS ===
+
+  // Validate uploaded document
+  ipcMain.handle("document-validate", async (event, buffer: ArrayBuffer, fileName: string) => {
+    try {
+      const documentProcessor = new DocumentProcessingOrchestrator(
+        process.env.GEMINI_API_KEY || '',
+        appState.qnaService
+      );
+      
+      return await documentProcessor.validateFile(Buffer.from(buffer), fileName);
+    } catch (error: any) {
+      console.error("Error validating document:", error);
+      throw error;
+    }
+  });
+
+  // Process document and create Q&A collection
+  ipcMain.handle("document-process", async (event, 
+    buffer: ArrayBuffer, 
+    fileName: string, 
+    mimeType: string,
+    options: DocumentProcessingOptions
+  ) => {
+    try {
+      const user = appState.authService.getCurrentUser();
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+
+      const documentProcessor = new DocumentProcessingOrchestrator(
+        process.env.GEMINI_API_KEY || '',
+        appState.qnaService
+      );
+
+      // Set up status callback to send progress updates
+      documentProcessor.setStatusCallback((status) => {
+        event.sender.send('document-processing-status', status);
+      });
+
+      const result = await documentProcessor.processDocumentFromBuffer(
+        Buffer.from(buffer),
+        fileName,
+        mimeType,
+        user.id,
+        options
+      );
+
+      return result;
+    } catch (error: any) {
+      console.error("Error processing document:", error);
+      throw error;
+    }
+  });
+
+  // Get document-based collections
+  ipcMain.handle("qna-get-document-collections", async () => {
+    try {
+      const user = appState.authService.getCurrentUser();
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+      return await appState.qnaService.getDocumentBasedCollections(user.id);
+    } catch (error: any) {
+      console.error("Error in qna-get-document-collections handler:", error);
+      throw error;
+    }
+  });
+
+  // Get collection analytics
+  ipcMain.handle("qna-get-collection-analytics", async (event, collectionId: string) => {
+    try {
+      return await appState.qnaService.getCollectionAnalytics(collectionId);
+    } catch (error: any) {
+      console.error("Error in qna-get-collection-analytics handler:", error);
+      throw error;
+    }
+  });
+
+  // Finalize reviewed Q&A collection
+  ipcMain.handle("document-finalize-collection", async (event,
+    documentResult: any,
+    reviewedQAs: any[],
+    collectionName: string,
+    collectionDescription?: string
+  ) => {
+    try {
+      const user = appState.authService.getCurrentUser();
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+
+      // Create collection with reviewed Q&As
+      const qaResult = {
+        ...documentResult.qaResult,
+        qaPairs: reviewedQAs
+      };
+
+      const collection = await appState.qnaService.createCollectionFromDocument(
+        user.id,
+        documentResult.document,
+        qaResult,
+        collectionName,
+        collectionDescription
+      );
+
+      return { success: true, collection };
+    } catch (error: any) {
+      console.error("Error finalizing collection:", error);
+      throw error;
+    }
+  });
+
+  // Get default processing options
+  ipcMain.handle("document-get-default-options", async () => {
+    try {
+      const documentProcessor = new DocumentProcessingOrchestrator(
+        process.env.GEMINI_API_KEY || ''
+      );
+      return documentProcessor.getDefaultOptions();
+    } catch (error: any) {
+      console.error("Error getting default options:", error);
       throw error;
     }
   });

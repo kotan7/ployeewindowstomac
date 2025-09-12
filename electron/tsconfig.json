@@ -15,7 +15,8 @@
     "strict": false,
     "forceConsistentCasingInFileNames": false,
     "declaration": false,
-    "removeComments": true
+    "removeComments": true,
+    "types": ["node"]
   },
   "include": ["*.ts"],
   "exclude": ["node_modules", "dist-electron"]

@@ -255,5 +255,57 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => {
       ipcRenderer.removeListener("toggle-chat", subscription)
     }
+  },
+
+  // Document Processing methods
+  documentValidate: (buffer: ArrayBuffer, fileName: string) => ipcRenderer.invoke("document-validate", buffer, fileName),
+  documentProcess: (buffer: ArrayBuffer, fileName: string, options?: any, progressCallback?: (status: any) => void) => {
+    // Set up progress listener if callback provided
+    if (progressCallback) {
+      const listener = (_: any, status: any) => progressCallback(status);
+      ipcRenderer.on('document-processing-progress', listener);
+      
+      // Return a promise that cleans up the listener
+      return ipcRenderer.invoke("document-process", buffer, fileName, options).finally(() => {
+        ipcRenderer.removeListener('document-processing-progress', listener);
+      });
+    }
+    return ipcRenderer.invoke("document-process", buffer, fileName, options);
+  },
+  documentFinalizeCollection: (sessionId: string, approvedItems: string[], collectionName?: string, collectionDescription?: string) => 
+    ipcRenderer.invoke("document-finalize-collection", sessionId, approvedItems, collectionName, collectionDescription),
+  documentGetReviewData: (sessionId: string) => ipcRenderer.invoke("document-get-review-data", sessionId),
+  documentCancelProcessing: (sessionId: string) => ipcRenderer.invoke("document-cancel-processing", sessionId),
+  
+  // Document Processing event listeners
+  onDocumentProcessingProgress: (callback: (status: any) => void) => {
+    const subscription = (_: any, status: any) => callback(status);
+    ipcRenderer.on('document-processing-progress', subscription);
+    return () => {
+      ipcRenderer.removeListener('document-processing-progress', subscription);
+    };
+  },
+  documentValidate: (buffer: ArrayBuffer, fileName: string) => 
+    ipcRenderer.invoke("document-validate", buffer, fileName),
+  documentProcess: (buffer: ArrayBuffer, fileName: string, mimeType: string, options: any) => 
+    ipcRenderer.invoke("document-process", buffer, fileName, mimeType, options),
+  documentGetDefaultOptions: () => 
+    ipcRenderer.invoke("document-get-default-options"),
+  documentFinalizeCollection: (documentResult: any, reviewedQAs: any[], collectionName: string, collectionDescription?: string) => 
+    ipcRenderer.invoke("document-finalize-collection", documentResult, reviewedQAs, collectionName, collectionDescription),
+    
+  // QnA Collection methods
+  qnaGetDocumentCollections: () => 
+    ipcRenderer.invoke("qna-get-document-collections"),
+  qnaGetCollectionAnalytics: (collectionId: string) => 
+    ipcRenderer.invoke("qna-get-collection-analytics", collectionId),
+    
+  // Document Processing event listeners
+  onDocumentProcessingStatus: (callback: (status: any) => void) => {
+    const subscription = (_: any, status: any) => callback(status)
+    ipcRenderer.on("document-processing-status", subscription)
+    return () => {
+      ipcRenderer.removeListener("document-processing-status", subscription)
+    }
   }
 } as ElectronAPI)

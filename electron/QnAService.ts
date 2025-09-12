@@ -1,5 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 import OpenAI from 'openai'
+import { ParsedDocument, GeneratedQA } from './DocumentParsingService'
+import { QAGenerationResult } from './QAGenerationService'
 
 export interface QnACollection {
   id: string
@@ -8,6 +10,15 @@ export interface QnACollection {
   created_at: string
   updated_at: string
   qna_count?: number
+  // Document-based collection metadata
+  source_document?: {
+    original_name: string
+    file_type: 'pdf' | 'image' | 'text'
+    size: number
+    processing_time: number
+    segmentation_strategy: string
+    auto_generated: boolean
+  }
 }
 
 export interface QnAItem {
@@ -18,6 +29,19 @@ export interface QnAItem {
   tags: string[] | null
   created_at: string
   updated_at: string
+  // Document-based item metadata
+  source_metadata?: {
+    segment_id: string
+    question_type: 'factual' | 'conceptual' | 'application' | 'analytical'
+    confidence: number
+    auto_generated: boolean
+    quality_scores?: {
+      relevance: number
+      clarity: number
+      completeness: number
+      uniqueness: number
+    }
+  }
 }
 
 export interface SearchResult {
@@ -195,16 +219,30 @@ export class QnAService {
   public async createCollection(
     userId: string,
     name: string,
-    description?: string
+    description?: string,
+    sourceDocument?: {
+      original_name: string
+      file_type: 'pdf' | 'image' | 'text'
+      size: number
+      processing_time: number
+      segmentation_strategy: string
+      auto_generated: boolean
+    }
   ): Promise<QnACollection> {
     try {
+      const insertData: any = {
+        user_id: userId,
+        name,
+        description
+      }
+
+      if (sourceDocument) {
+        insertData.source_document = sourceDocument
+      }
+
       const { data, error } = await this.supabase
         .from('qna_collections')
-        .insert({
-          user_id: userId,
-          name,
-          description
-        })
+        .insert(insertData)
         .select()
         .single()
 
@@ -316,6 +354,200 @@ export class QnAService {
     } catch (error) {
       console.error('Error deleting collection:', error)
       return false
+    }
+  }
+
+  // === DOCUMENT-BASED COLLECTION METHODS ===
+
+  public async createCollectionFromDocument(
+    userId: string,
+    document: ParsedDocument,
+    qaResult: QAGenerationResult,
+    collectionName?: string,
+    description?: string
+  ): Promise<QnACollection> {
+    try {
+      const collection = await this.createCollection(
+        userId,
+        collectionName || `Document: ${document.originalName}`,
+        description || `Auto-generated from ${document.originalName} - ${qaResult.qaPairs.length} questions`,
+        {
+          original_name: document.originalName,
+          file_type: document.metadata.fileType,
+          size: document.size,
+          processing_time: document.processingTime,
+          segmentation_strategy: document.segments[0]?.segmentType || 'unknown',
+          auto_generated: true
+        }
+      )
+
+      // Add all Q&A items in bulk
+      await this.bulkAddQnAItems(collection.id, qaResult.qaPairs)
+
+      return collection
+    } catch (error) {
+      console.error('Error creating collection from document:', error)
+      throw error
+    }
+  }
+
+  public async bulkAddQnAItems(
+    collectionId: string,
+    qaPairs: GeneratedQA[]
+  ): Promise<QnAItem[]> {
+    try {
+      const items = []
+      
+      // Process in batches to avoid overwhelming the database
+      const batchSize = 10
+      for (let i = 0; i < qaPairs.length; i += batchSize) {
+        const batch = qaPairs.slice(i, i + batchSize)
+        const batchItems = await Promise.all(
+          batch.map(qa => this.addQnAItemFromGenerated(collectionId, qa))
+        )
+        items.push(...batchItems)
+      }
+
+      return items
+    } catch (error) {
+      console.error('Error bulk adding Q&A items:', error)
+      throw error
+    }
+  }
+
+  private async addQnAItemFromGenerated(
+    collectionId: string,
+    qa: GeneratedQA
+  ): Promise<QnAItem> {
+    try {
+      // Generate embedding for the question
+      const embedding = await this.generateEmbedding(qa.question)
+
+      const { data, error } = await this.supabase
+        .from('qna_items')
+        .insert({
+          collection_id: collectionId,
+          question: qa.question,
+          answer: qa.answer,
+          tags: qa.tags,
+          embedding,
+          source_metadata: {
+            segment_id: qa.sourceSegmentId,
+            question_type: qa.questionType,
+            confidence: qa.confidence,
+            auto_generated: true
+          }
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
+      return data
+    } catch (error) {
+      console.error('Error adding Q&A item from generated:', error)
+      throw error
+    }
+  }
+
+  public async getDocumentBasedCollections(userId: string): Promise<QnACollection[]> {
+    try {
+      const { data, error } = await this.supabase
+        .from('qna_collections')
+        .select(`
+          *,
+          qna_items(count)
+        `)
+        .eq('user_id', userId)
+        .not('source_document', 'is', null)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      const collectionsWithCount = data?.map(collection => ({
+        ...collection,
+        qna_count: collection.qna_items?.[0]?.count || 0
+      })) || []
+
+      return collectionsWithCount
+    } catch (error) {
+      console.error('Error fetching document-based collections:', error)
+      throw error
+    }
+  }
+
+  public async getCollectionAnalytics(collectionId: string): Promise<{
+    totalQuestions: number
+    questionTypeDistribution: Record<string, number>
+    averageQuality: number
+    autoGeneratedCount: number
+    manualCount: number
+  }> {
+    try {
+      const items = await this.getCollectionItems(collectionId)
+      
+      const analytics = {
+        totalQuestions: items.length,
+        questionTypeDistribution: {} as Record<string, number>,
+        averageQuality: 0,
+        autoGeneratedCount: 0,
+        manualCount: 0
+      }
+
+      let totalQuality = 0
+      let qualityCount = 0
+
+      items.forEach(item => {
+        // Count by generation method
+        if (item.source_metadata?.auto_generated) {
+          analytics.autoGeneratedCount++
+        } else {
+          analytics.manualCount++
+        }
+
+        // Distribution by question type
+        const questionType = item.source_metadata?.question_type || 'manual'
+        analytics.questionTypeDistribution[questionType] = 
+          (analytics.questionTypeDistribution[questionType] || 0) + 1
+
+        // Quality scoring
+        if (item.source_metadata?.confidence) {
+          totalQuality += item.source_metadata.confidence
+          qualityCount++
+        }
+      })
+
+      analytics.averageQuality = qualityCount > 0 ? totalQuality / qualityCount : 0
+
+      return analytics
+    } catch (error) {
+      console.error('Error getting collection analytics:', error)
+      throw error
+    }
+  }
+
+  public async regenerateQuestionsForCollection(
+    collectionId: string,
+    segmentIds: string[],
+    questionTypes: string[]
+  ): Promise<number> {
+    try {
+      // Remove existing auto-generated questions for the specified segments
+      const { error: deleteError } = await this.supabase
+        .from('qna_items')
+        .delete()
+        .eq('collection_id', collectionId)
+        .in('source_metadata->segment_id', segmentIds)
+        .eq('source_metadata->auto_generated', true)
+
+      if (deleteError) throw deleteError
+
+      // This method would be called after regenerating Q&As
+      // The actual regeneration would happen in the document processing service
+      return segmentIds.length
+    } catch (error) {
+      console.error('Error regenerating questions:', error)
+      throw error
     }
   }
 }
