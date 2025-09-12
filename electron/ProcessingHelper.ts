@@ -2,14 +2,7 @@
 
 import { AppState } from "./main"
 import { LLMHelper } from "./LLMHelper"
-import dotenv from "dotenv"
-
-try {
-  const envPath = require('path').join(process.resourcesPath || process.cwd(), '.env')
-  dotenv.config({ path: envPath })
-} catch {
-  dotenv.config()
-}
+// Note: dotenv is already loaded in main.ts, no need to load again
 
 const isDev = process.env.NODE_ENV === "development"
 const isDevTest = process.env.IS_DEV_TEST === "true"

@@ -1,3 +1,31 @@
+import dotenv from "dotenv"
+import path from "path"
+
+// Load environment variables FIRST before any other imports
+// Try multiple approaches to load .env file for better reliability
+const envPaths = [
+  path.join(process.cwd(), '.env'),
+  path.join(process.resourcesPath || process.cwd(), '.env'),
+  '.env'
+]
+
+let envLoaded = false
+for (const envPath of envPaths) {
+  try {
+    const result = dotenv.config({ path: envPath })
+    if (!result.error) {
+      envLoaded = true
+      break
+    }
+  } catch (error) {
+    // Continue to next path
+  }
+}
+
+if (!envLoaded) {
+  dotenv.config() // Fallback to default
+}
+
 import { app, BrowserWindow, Tray, Menu, nativeImage } from "electron"
 import { initializeIpcHandlers } from "./ipcHandlers"
 import { WindowHelper } from "./WindowHelper"
@@ -8,15 +36,6 @@ import { AuthService } from "./AuthService"
 import { QnAService } from "./QnAService"
 import { UsageTracker } from "./UsageTracker"
 import { AudioStreamProcessor } from "./AudioStreamProcessor"
-import dotenv from "dotenv"
-
-// Load env in packaged app as well
-try {
-  const envPath = require('path').join(process.resourcesPath || process.cwd(), '.env')
-  dotenv.config({ path: envPath })
-} catch {
-  dotenv.config()
-}
 
 export class AppState {
   private static instance: AppState | null = null
