@@ -34,7 +34,10 @@ export class AudioStreamProcessor extends EventEmitter {
     'まあ', 'なんか', 'ちょっと', 'やっぱり', 'やっぱ', 'だから', 'でも',
     'うん', 'はい', 'そう', 'ですね', 'ですが', 'ただ', 'まず', 'それで',
     'というか', 'てか', 'なので', 'けど', 'けれど', 'しかし', 'でも',
-    'ー', '〜', 'う〜ん', 'え〜', 'あ〜', 'そ〜', 'ん〜'
+    'ー', '〜', 'う〜ん', 'え〜', 'あ〜', 'そ〜', 'ん〜',
+    // Additional fillers
+    'じゃあ', 'では', 'それでは', 'さて', 'ちなみに', 'ところで', 'えっと', 'えと',
+    'あの', 'その', 'とりあえず', 'まぁ', 'まぁその', 'なんていうか'
   ]);
 
   private readonly questionStarters = new Set([
@@ -331,30 +334,42 @@ export class AudioStreamProcessor extends EventEmitter {
   private async detectAndRefineQuestions(transcription: TranscriptionResult): Promise<void> {
     try {
       const detectedQuestion = this.questionDetector.detectQuestion(transcription);
-      
-      if (detectedQuestion && this.questionDetector.isValidQuestion(detectedQuestion)) {
-        console.log('[AudioStreamProcessor] Question detected:', detectedQuestion.text);
-        
-        // Immediately refine the question algorithmically
-        const refinedText = this.refineQuestionAlgorithmically(detectedQuestion.text);
-        
-        // Create refined question object
-        const refinedQuestion: DetectedQuestion & { refinedText?: string } = {
-          ...detectedQuestion,
-          refinedText: refinedText
+
+      // Use either detector output or fall back to full transcription for heuristics
+      const baseText = detectedQuestion ? detectedQuestion.text : transcription.text;
+
+      // Split possible multiple questions, trim preface, and refine each
+      const questionParts = this.splitIntoQuestions(baseText);
+
+      for (const part of questionParts) {
+        const core = this.trimPreface(part);
+        if (!core || core.trim().length < 2) continue;
+
+        const tempQuestion: DetectedQuestion = {
+          id: uuidv4(),
+          text: core.trim(),
+          timestamp: detectedQuestion ? detectedQuestion.timestamp : transcription.timestamp,
+          confidence: detectedQuestion ? detectedQuestion.confidence : transcription.confidence
         };
-        
-        // Add to question buffer
+
+        // Validate by either the detector's rules or our heuristic recognizer
+        if (!this.questionDetector.isValidQuestion(tempQuestion) && !this.looksLikeQuestion(core)) {
+          continue;
+        }
+
+        const refinedText = this.refineQuestionAlgorithmically(core);
+
+        const refinedQuestion: DetectedQuestion & { refinedText?: string } = {
+          ...tempQuestion,
+          refinedText
+        };
+
         this.state.questionBuffer.push(refinedQuestion);
-        
-        // Emit immediately - no batching delay
         this.emit('question-detected', refinedQuestion);
+      }
+
+      if (questionParts.length > 0) {
         this.emit('state-changed', { ...this.state });
-        
-        console.log('[AudioStreamProcessor] Question refined and emitted:', {
-          original: detectedQuestion.text,
-          refined: refinedText
-        });
       }
       
     } catch (error) {
@@ -441,10 +456,81 @@ export class AudioStreamProcessor extends EventEmitter {
     const questionPatterns = [
       /どう.*/, /どの.*/, /どこ.*/, /いつ.*/, /なぜ.*/, /なん.*/, /何.*/, 
       /だれ.*/, /誰.*/, /どちら.*/, /どれ.*/, /いくら.*/, /いくつ.*/,
-      /.*ですか/, /.*ますか/, /.*でしょうか/, /.*かしら/, /.*のか/
+      /.*ですか/, /.*ますか/, /.*でしょうか/, /.*かしら/, /.*のか/,
+      // Polite request endings that imply a question/request
+      /.*(教えてください|お聞かせください|お願いします|お願いできますか|お願いしてもいいですか|いただけますか|頂けますか|いただけませんか|てもらえますか|てくれますか|てください)[。?？]?$/
     ];
     
     return questionPatterns.some(pattern => pattern.test(text));
+  }
+
+  /**
+   * Split a transcription into individual question-like parts.
+   */
+  private splitIntoQuestions(text: string): string[] {
+    if (!text) return [];
+
+    // First, split by strong sentence delimiters
+    let parts = text
+      .split(/[\n]+|[！？!。]/)
+      .map(p => p.trim())
+      .filter(p => p.length > 0);
+
+    // Further split by question marks while keeping content
+    const refinedParts: string[] = [];
+    for (const part of parts) {
+      const qmSplit = part.split(/[？?]/).map(p => p.trim()).filter(Boolean);
+      if (qmSplit.length > 1) {
+        refinedParts.push(...qmSplit);
+      } else {
+        refinedParts.push(part);
+      }
+    }
+
+    // If still long and contains connectors suggesting multiple items, split on them
+    const connectors = ['それから', 'あと', '次に', 'つぎに'];
+    const finalParts: string[] = [];
+    for (const p of refinedParts) {
+      let subParts: string[] = [p];
+      for (const c of connectors) {
+        subParts = subParts.flatMap(sp => sp.split(c).map(s => s.trim()).filter(Boolean));
+      }
+      finalParts.push(...subParts);
+    }
+
+    // Filter to parts that look like questions or end with question-ish endings
+    return finalParts
+      .map(p => p.replace(/[、\s]+$/g, '').trim())
+      .filter(p => p.length >= 2 && (this.looksLikeQuestion(p) || /[?？]$/.test(p) || /(ですか|ますか|でしょうか|か)$/.test(p) || /(教えてください|お聞かせください|お願いします|お願いできますか|いただけますか|頂けますか|いただけませんか|てもらえますか|てくれますか|てください)$/.test(p)));
+  }
+
+  /**
+   * Remove unrelated preface before the core question. Heuristic: cut from
+   * the earliest occurrence of a question starter or polite-request marker.
+   */
+  private trimPreface(text: string): string {
+    const trimmed = text.trim();
+    if (!trimmed) return trimmed;
+
+    // Do NOT cut when sentence structure contains "について" before the question part
+    // Example: "Aについてどう思いますか？" -> keep the leading topic
+    const keepTopicPatterns = [/について.*(ですか|ますか|でしょうか|か|[?？]$)/];
+    if (keepTopicPatterns.some(p => p.test(trimmed))) {
+      return trimmed;
+    }
+
+    // Remove only leading filler/preamble tokens at the start (anchored)
+    const leadingPrefacePattern = /^(じゃあ|では|それでは|さて|ちなみに|ところで|えっと|えと|あの|その|とりあえず|まぁ|まぁその|なんていうか|まず|えー|あー|うー|そのー|えーっと)\s+/;
+    let result = trimmed;
+    // Remove repeatedly in case of stacked fillers
+    for (let i = 0; i < 3; i++) {
+      if (leadingPrefacePattern.test(result)) {
+        result = result.replace(leadingPrefacePattern, '').trim();
+      } else {
+        break;
+      }
+    }
+    return result;
   }
 
   /**
