@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { MessageSquare, Clock, Sparkles } from 'lucide-react';
+import { MessageSquare, HelpCircle } from 'lucide-react';
 import { DetectedQuestion, AudioStreamState } from '../../types/audio-stream';
 
 interface QuestionSidePanelProps {
@@ -25,15 +25,6 @@ const QuestionItem: React.FC<QuestionItemProps> = ({
   isSelected,
   onClick
 }) => {
-  const formatTimestamp = (timestamp: number): string => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('ja-JP', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      second: '2-digit'
-    });
-  };
-
   const refined = (question as any).refinedText as string | undefined;
   const displayText = refined && refined.trim().length > 0 
     ? refined 
@@ -41,20 +32,14 @@ const QuestionItem: React.FC<QuestionItemProps> = ({
 
   return (
     <div 
-      className={`morphism-dropdown border rounded-lg p-3 cursor-pointer transition-all ${
+      className={`flex items-center gap-3 p-3 cursor-pointer transition-all rounded-lg ${
         isSelected 
-          ? 'border-blue-400/50 bg-blue-500/10' 
-          : 'border-white/10 hover:border-white/20'
+          ? 'bg-green-600/10 border-l-2 border-green-600' 
+          : 'hover:bg-white/5'
       }`}
       onClick={onClick}
     >
-      <div className="flex items-center gap-2 mb-2">
-        <Sparkles className="w-3 h-3 text-emerald-400" />
-        <span className="text-[10px] text-white/50 flex items-center gap-1">
-          <Clock className="w-3 h-3" />
-          {formatTimestamp(question.timestamp)}
-        </span>
-      </div>
+      <HelpCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
       <p className="text-xs text-white/90 leading-relaxed">
         {displayText}
       </p>
@@ -142,12 +127,12 @@ const QuestionSidePanel: React.FC<QuestionSidePanelProps> = ({
         {/* Left Panel - Questions */}
         <div className="flex-1 liquid-glass chat-container p-4">
           <div className="flex items-center gap-2 mb-3">
-            <MessageSquare className="w-4 h-4 text-blue-400" />
+            <MessageSquare className="w-4 h-4 text-green-600" />
             <span className="text-sm font-medium text-white/90">
               検出された質問
             </span>
             {refinedQuestions.length > 0 && (
-              <span className="bg-blue-500/20 text-blue-300 text-xs px-2 py-0.5 rounded-full">
+              <span className="bg-green-600/20 text-green-300 text-xs px-2 py-0.5 rounded-full">
                 {refinedQuestions.length}
               </span>
             )}
@@ -167,7 +152,7 @@ const QuestionSidePanel: React.FC<QuestionSidePanelProps> = ({
               </p>
             </div>
           ) : (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
+            <div className="space-y-1 max-h-64 overflow-y-auto">
               {refinedQuestions.map((question) => (
                 <QuestionItem
                   key={question.id}
@@ -194,9 +179,13 @@ const QuestionSidePanel: React.FC<QuestionSidePanelProps> = ({
               </p>
             </div>
           ) : generatingAnswer ? (
-            <div className="flex items-center gap-2 py-8">
-              <div className="animate-spin rounded-full h-4 w-4 border border-white/30 border-t-white/70" />
-              <span className="text-xs text-white/70">回答を生成中...</span>
+            <div className="flex items-center justify-center py-8">
+              <span className="text-xs text-white/70 mr-2">回答を生成中</span>
+              <div className="flex gap-0.5">
+                <div className="w-1 h-1 bg-white/70 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                <div className="w-1 h-1 bg-white/70 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
+                <div className="w-1 h-1 bg-white/70 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
+              </div>
             </div>
           ) : currentAnswer ? (
             <div className="text-xs text-white/80 leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto">

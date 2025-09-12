@@ -7,8 +7,8 @@ import {
   ChevronDown,
   Database,
   Bot,
-  Headphones,
-  HeadphonesIcon,
+  Mic,
+  MicIcon,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogClose } from "../ui/dialog";
 import { DetectedQuestion, AudioStreamState } from "../../types/audio-stream";
@@ -575,12 +575,12 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
             >
               {isListening ? (
                 <>
-                  <Headphones className="w-3 h-3 mr-1" />
+                  <Mic className="w-3 h-3 mr-1" />
                   <span className="animate-pulse">録音停止</span>
                 </>
               ) : (
                 <>
-                  <HeadphonesIcon className="w-3 h-3 mr-1" />
+                  <MicIcon className="w-3 h-3 mr-1" />
                   <span>録音開始</span>
                 </>
               )}
